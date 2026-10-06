@@ -25,6 +25,10 @@ import numpy as np
 def stats(name, a, b):
     a = np.asarray(a, dtype=np.float64)
     b = np.asarray(b, dtype=np.float64)
+    if a.ndim != 1 or b.ndim != 1 or a.shape != b.shape or a.size == 0:
+        raise ValueError("logits must be nonempty one-dimensional vectors of equal shape")
+    if not np.isfinite(a).all() or not np.isfinite(b).all():
+        raise ValueError("logits must be finite")
     d = np.abs(a - b)
     denom = np.maximum(np.abs(b), 1.0)
     rel = d / denom
@@ -57,13 +61,14 @@ def main():
     mode = "faithful-bitlinear" if faithful else "weight-quant-only"
     print(f"  mode: {mode} (reference: {ref_key})")
 
-    assert len(rust["prompts"]) == len(ref["prompts"])
+    if not rust["prompts"] or len(rust["prompts"]) != len(ref["prompts"]):
+        raise ValueError("prompt sets must be nonempty and have equal length")
     ok_all = True
     for rp, fp in zip(rust["prompts"], ref["prompts"]):
-        assert rp["n_tokens"] == fp["n_tokens"], (
-            f"prompt {rp['prompt']} token count mismatch: "
-            f"rust {rp['n_tokens']} vs ref {fp['n_tokens']}"
-        )
+        if rp["prompt"] != fp["prompt"]:
+            raise ValueError("prompt identity mismatch")
+        if rp["n_tokens"] != fp["n_tokens"]:
+            raise ValueError("prompt token count mismatch")
         rs = stats(f"prompt {rp['prompt']} rust-vs-mlx-{mode}",
                    rp["logits"], fp[ref_key])
         print(json.dumps(rs))
@@ -88,4 +93,8 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except (ValueError, KeyError, TypeError, OSError) as exc:
+        print(f"Invalid comparison input: {exc}", file=sys.stderr)
+        sys.exit(1)
