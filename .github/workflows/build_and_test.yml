@@ -105,7 +105,7 @@ jobs:
         if: matrix.toolkit == 'cpu'
         with:
           toolkit: 'cpu'
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@v4
         if: matrix.toolkit == 'metal'
         with:
           name: mlx-${{ matrix.toolkit }}-macos${{ matrix.macos-target }}
@@ -120,16 +120,21 @@ jobs:
     if: github.repository == 'ml-explore/mlx'
     runs-on: [self-hosted, macos]
     needs: mac_build
+    permissions:
+      contents: read
+      actions: read
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/setup
         with:
           toolkit: 'metal'
           use-ccache: false
-      - uses: actions/download-artifact@v8
-        with:
-          path: artifact
-          pattern: mlx-metal-*
+      - name: Download this run's Metal artifacts
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh run download "$GITHUB_RUN_ID" --repo "$GITHUB_REPOSITORY" \
+            --pattern 'mlx-metal-*' --dir artifact
       - run: ls -lhR artifact
       - uses: ./.github/actions/test-macos
         with:
