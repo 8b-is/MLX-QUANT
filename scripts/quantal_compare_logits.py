@@ -26,7 +26,9 @@ def stats(name, a, b):
     a = np.asarray(a, dtype=np.float64)
     b = np.asarray(b, dtype=np.float64)
     if a.ndim != 1 or b.ndim != 1 or a.shape != b.shape or a.size == 0:
-        raise ValueError("logits must be nonempty one-dimensional vectors of equal shape")
+        raise ValueError(
+            "logits must be nonempty one-dimensional vectors of equal shape"
+        )
     if not np.isfinite(a).all() or not np.isfinite(b).all():
         raise ValueError("logits must be finite")
     d = np.abs(a - b)
@@ -69,23 +71,32 @@ def main():
             raise ValueError("prompt identity mismatch")
         if rp["n_tokens"] != fp["n_tokens"]:
             raise ValueError("prompt token count mismatch")
-        rs = stats(f"prompt {rp['prompt']} rust-vs-mlx-{mode}",
-                   rp["logits"], fp[ref_key])
+        rs = stats(
+            f"prompt {rp['prompt']} rust-vs-mlx-{mode}", rp["logits"], fp[ref_key]
+        )
         print(json.dumps(rs))
         gate = rs["max_abs"] <= 1e-2 or rs["max_rel"] <= 1e-2
         ok_all &= gate
-        print(f"  GATE {'PASS' if gate else 'FAIL'} "
-              f"(max_abs={rs['max_abs']:.3e} max_rel={rs['max_rel']:.3e})")
+        print(
+            f"  GATE {'PASS' if gate else 'FAIL'} "
+            f"(max_abs={rs['max_abs']:.3e} max_rel={rs['max_rel']:.3e})"
+        )
         # Reference sanity: report the opposite pairing + vanilla-vs-bitlinear
         # gap so the oracle can see the delta the other forward would cost.
         other_key = "logits_vanilla" if faithful else "logits_bitlinear"
         if other_key in fp:
-            os_ = stats(f"prompt {rp['prompt']} rust-vs-mlx-{other_key}",
-                        rp["logits"], fp[other_key])
+            os_ = stats(
+                f"prompt {rp['prompt']} rust-vs-mlx-{other_key}",
+                rp["logits"],
+                fp[other_key],
+            )
             print(json.dumps(os_))
         if "logits_bitlinear" in fp and "logits_vanilla" in fp:
-            vs = stats(f"prompt {rp['prompt']} mlx-vanilla-vs-bitlinear",
-                       fp["logits_vanilla"], fp["logits_bitlinear"])
+            vs = stats(
+                f"prompt {rp['prompt']} mlx-vanilla-vs-bitlinear",
+                fp["logits_vanilla"],
+                fp["logits_bitlinear"],
+            )
             print(json.dumps(vs))
 
     print("RESULT:", "PASS" if ok_all else "FAIL")
