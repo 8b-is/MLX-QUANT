@@ -64,13 +64,21 @@ def main():
     print(f"  mode: {mode} (reference: {ref_key})")
 
     if not rust["prompts"] or len(rust["prompts"]) != len(ref["prompts"]):
-        raise ValueError("prompt sets must be nonempty and have equal length")
+        raise ValueError(
+            "prompt sets must be nonempty and have equal length: "
+            f"rust {len(rust['prompts'])} vs ref {len(ref['prompts'])}"
+        )
     ok_all = True
     for rp, fp in zip(rust["prompts"], ref["prompts"]):
         if rp["prompt"] != fp["prompt"]:
-            raise ValueError("prompt identity mismatch")
+            raise ValueError(
+                f"prompt identity mismatch: rust {rp['prompt']!r} vs ref {fp['prompt']!r}"
+            )
         if rp["n_tokens"] != fp["n_tokens"]:
-            raise ValueError("prompt token count mismatch")
+            raise ValueError(
+                f"prompt {rp['prompt']!r} token count mismatch: "
+                f"rust {rp['n_tokens']} vs ref {fp['n_tokens']}"
+            )
         rs = stats(
             f"prompt {rp['prompt']} rust-vs-mlx-{mode}", rp["logits"], fp[ref_key]
         )

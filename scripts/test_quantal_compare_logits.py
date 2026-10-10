@@ -111,6 +111,23 @@ class ComparisonTests(unittest.TestCase):
         ]
         self.check_case(rust, ref, 1)
 
+    def test_nonfinite_reference(self):
+        self.check_case(
+            [{"prompt": "hello", "n_tokens": 1, "logits": [1]}],
+            [{"prompt": "hello", "n_tokens": 1, "logits_vanilla": [float("inf")]}],
+            1,
+        )
+
+    def test_prompt_set_length_mismatch(self):
+        self.check_case(
+            [{"prompt": "hello", "n_tokens": 1, "logits": [1]}],
+            [
+                {"prompt": "hello", "n_tokens": 1, "logits_vanilla": [1]},
+                {"prompt": "world", "n_tokens": 1, "logits_vanilla": [2]},
+            ],
+            1,
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
