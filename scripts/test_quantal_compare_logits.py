@@ -1,5 +1,6 @@
 """Offline CLI regression tests; no MLX runtime or models required."""
 
+import itertools
 import json
 import subprocess
 import sys
@@ -72,6 +73,43 @@ class ComparisonTests(unittest.TestCase):
             [{"prompt": "hello", "n_tokens": 1, "logits_vanilla": [1]}],
             1,
         )
+
+    def test_joint_permutation_preserves_acceptance(self):
+        rust = [
+            {"prompt": name, "n_tokens": 1, "logits": [value, 0]}
+            for name, value in (("alpha", 1), ("beta", 2), ("gamma", 3))
+        ]
+        ref = [
+            {"prompt": row["prompt"], "n_tokens": 1, "logits_vanilla": row["logits"]}
+            for row in rust
+        ]
+        for order in itertools.permutations(range(3)):
+            with self.subTest(order=order):
+                self.check_case([rust[i] for i in order], [ref[i] for i in order], 0)
+
+    def test_joint_permutation_cannot_hide_failing_item(self):
+        rust = [
+            {"prompt": name, "n_tokens": 1, "logits": [value, 0]}
+            for name, value in (("alpha", 1), ("beta", 9), ("gamma", 3))
+        ]
+        ref = [
+            {"prompt": name, "n_tokens": 1, "logits_vanilla": [value, 0]}
+            for name, value in (("alpha", 1), ("beta", 2), ("gamma", 3))
+        ]
+        for order in itertools.permutations(range(3)):
+            with self.subTest(order=order):
+                self.check_case([rust[i] for i in order], [ref[i] for i in order], 1)
+
+    def test_one_sided_reorder_rejects_identical_logits(self):
+        rust = [
+            {"prompt": name, "n_tokens": 1, "logits": [1, 0]}
+            for name in ("alpha", "beta")
+        ]
+        ref = [
+            {"prompt": name, "n_tokens": 1, "logits_vanilla": [1, 0]}
+            for name in ("beta", "alpha")
+        ]
+        self.check_case(rust, ref, 1)
 
 
 if __name__ == "__main__":
