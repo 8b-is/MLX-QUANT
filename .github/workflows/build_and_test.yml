@@ -19,9 +19,14 @@ jobs:
   check_lint:
     name: Check Lint
     runs-on: ubuntu-22.04
+    timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v7
-      - uses: pre-commit/action@v3.0.1
+      - uses: actions/checkout@v4
+      - name: Check all configured pre-commit hooks
+        run: |
+          python3 -m venv "$RUNNER_TEMP/mlx-lint"
+          "$RUNNER_TEMP/mlx-lint/bin/python" -m pip install pre-commit==4.3.0
+          "$RUNNER_TEMP/mlx-lint/bin/pre-commit" run --all-files --show-diff-on-failure --color=always
 
   build_and_test:
     name: ${{ matrix.os }} (${{ matrix.toolkit }}, ${{ matrix.arch }})
@@ -58,7 +63,7 @@ jobs:
                     'ubuntu-22.04'))
       }}
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v4
       - uses: ./.github/actions/setup
         id: setup
         with:
@@ -83,7 +88,7 @@ jobs:
     runs-on: 'macos-26'
     needs: check_lint
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v4
       - uses: ./.github/actions/setup
         id: setup
         with:
@@ -100,7 +105,7 @@ jobs:
         if: matrix.toolkit == 'cpu'
         with:
           toolkit: 'cpu'
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@v4
         if: matrix.toolkit == 'metal'
         with:
           name: mlx-${{ matrix.toolkit }}-macos${{ matrix.macos-target }}
@@ -115,16 +120,21 @@ jobs:
     if: github.repository == 'ml-explore/mlx'
     runs-on: [self-hosted, macos]
     needs: mac_build
+    permissions:
+      contents: read
+      actions: read
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v4
       - uses: ./.github/actions/setup
         with:
           toolkit: 'metal'
           use-ccache: false
-      - uses: actions/download-artifact@v8
-        with:
-          path: artifact
-          pattern: mlx-metal-*
+      - name: Download this run's Metal artifacts
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh run download "$GITHUB_RUN_ID" --repo "$GITHUB_REPOSITORY" \
+            --pattern 'mlx-metal-*' --dir artifact
       - run: ls -lhR artifact
       - uses: ./.github/actions/test-macos
         with:
@@ -136,7 +146,7 @@ jobs:
     runs-on: ubuntu-22.04
     needs: check_lint
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v4
       - uses: ./.github/actions/build-docs
 
   linux_sanitizer_build_and_test:
@@ -151,7 +161,7 @@ jobs:
     runs-on: ubuntu-22.04-arm
     steps:
       - name: Checkout code
-        uses: actions/checkout@v7
+        uses: actions/checkout@v4
 
       - name: Install Dependencies
         run: |
@@ -189,7 +199,7 @@ jobs:
       image: fedora:42
     steps:
       - name: Checkout code
-        uses: actions/checkout@v7
+        uses: actions/checkout@v4
 
       - name: CPP Build Test - No Release
         run: |
