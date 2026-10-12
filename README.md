@@ -1,8 +1,26 @@
 <div align="center">
-  <img src="./assets/hero.jpg" alt="MLX-QUANT: Polar Galaxy Merge" width="800"/>
+  <img src="./assets/hero-zeno.svg" alt="ZENO — MLX-QUANT v2.0.0-RC1: direct-to-Metal ternary" width="800"/>
   <h1>MLX-QUANT 🚀</h1>
   <p><strong>Bare-metal Tensor Quantization, Hardware Doorbells, and the Grand Unified Astrophysical Architecture.</strong></p>
+  <p><sub>v2.0.0-RC1 "Zeno" · { −1, 0, +1 } · the GPU brain of the ayeOS mesh</sub></p>
 </div>
+
+---
+
+## 🔖 v2.0.0-RC1 "Zeno" — release candidate
+
+The 2.0 line opens with the omnifold (75 fork commits + the golden-logits
+gate, one tree) and the Zeno identity. The four RC1 documents:
+
+| deliverable | document |
+| :--- | :--- |
+| zero-cost audit | [`docs/rc1/zero-cost-audit.md`](./docs/rc1/zero-cost-audit.md) |
+| capability graph | [`docs/rc1/capability-graph.md`](./docs/rc1/capability-graph.md) |
+| build matrix | [`docs/rc1/build-matrix.md`](./docs/rc1/build-matrix.md) |
+| release notes | [`docs/rc1/release-notes.md`](./docs/rc1/release-notes.md) |
+
+Full icon pack: `assets/zeno.icns` · `assets/icons/zeno-{16..1024}.png` ·
+mark `assets/zeno-mark.svg`.
 
 ---
 

@@ -6,6 +6,39 @@ upstreamed. Versions here are independent of upstream MLX's own version
 numbers (this fork branched from upstream `973e27f8`, tagged `v0.32.0` in
 upstream's own scheme).
 
+## v2.0.0-RC1 "Zeno"
+
+Release candidate for the 2.0 line. Major bump: the omnifold (75 commits of
+fork-local work folded onto org main alongside the golden-logits gate),
+the Zeno identity (logo, full app icon pack, README hero), and the
+wallet-triggered inference path mapped onto the Vaked capability graph.
+
+- **The omnifold** — `ac6cf680`: fork main + PR #1 (golden-logits
+  validation) in one tree. Includes BitNet b1.58 `TernaryLinear` +
+  quantization utils, fused Metal kernels (`ternary_qmv_fast`/`ternary_qmv`/
+  `ternary_qvm`/`ternary_qmm_t`), the GEMV/GEMM + memory-bandwidth bench
+  suite, DMA doorbell / polar-queue dispatch, PM4 command packets for
+  MI300X, the bare-metal O(1) bump allocator, the corpus builder + cogito
+  classifier, and the Vaimshuk instrumented E2E pipeline.
+- **Zeno identity** — `assets/zeno-mark.svg`, `assets/zeno-appicon.svg`,
+  `assets/zeno.icns`, `assets/icons/zeno-{16..1024}.png`,
+  `assets/hero-zeno.{svg,png}`. The arrow frozen at the instant: the ternary
+  frame {−1, 0, +1} pierced mid-flight, the cyan zero at the centroid,
+  the wallet ring around it.
+- **The four RC1 documents** — `docs/rc1/zero-cost-audit.md`,
+  `docs/rc1/capability-graph.md`, `docs/rc1/build-matrix.md`,
+  `docs/rc1/release-notes.md`. Measured rows cite sources; designed rows
+  say *designed*; unverified rows carry `○` in public.
+- **Retired** the pre-RC1 hero/infographic assets (hero.jpg,
+  mlx-quant-hero.png, mlx-quant-ternary-diagram.png, the landing
+  infographics) ahead of the Zeno identity.
+
+Known gaps at RC1 (see `docs/rc1/release-notes.md` for the full frame):
+BumpAllocator's `unsafe impl Sync` is held by convention (hazard-epoch fix
+scheduled); batched (`w.ndim() > 2`) weights still compose instead of fuse;
+no standalone Zig build target; the Linux lane has no green CI host yet;
+org-hosted CI never leaves the queue — local suites are the receipt.
+
 ## v1.4.2 "Omni"
 
 Closes essentially every remaining gap named in v1.0.0's "known gaps"

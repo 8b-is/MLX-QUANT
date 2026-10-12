@@ -1,0 +1,29 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <defs>
+    <linearGradient id="zeno-bg2" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#1A0F1E"/>
+      <stop offset="1" stop-color="#120A16"/>
+    </linearGradient>
+    <linearGradient id="zeno-pink2" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#FF4D9D"/>
+      <stop offset="1" stop-color="#FF8FC0"/>
+    </linearGradient>
+  </defs>
+
+  <rect x="32" y="32" width="960" height="960" rx="220" fill="url(#zeno-bg2)"/>
+  <rect x="32" y="32" width="960" height="960" rx="220" fill="none" stroke="#FF4D9D" stroke-opacity="0.28" stroke-width="4"/>
+
+  <circle cx="512" cy="512" r="330" fill="none" stroke="#62E6C9" stroke-opacity="0.35" stroke-width="3" stroke-dasharray="2 14"/>
+
+  <g transform="translate(512 512)">
+    <line x1="-216" y1="0" x2="176" y2="0" stroke="url(#zeno-pink2)" stroke-width="16" stroke-linecap="round"/>
+    <path d="M 168 -6 L 268 0 L 168 6 Z" fill="#FF4D9D"/>
+
+    <path d="M 0 -238 L 206 168 L -206 168 Z" fill="none" stroke="#FF4D9D" stroke-opacity="0.85" stroke-width="12" stroke-linejoin="round"/>
+    <circle cx="0" cy="-238" r="22" fill="#1A0F1E" stroke="#FF8FC0" stroke-width="8"/>
+    <circle cx="-206" cy="168" r="22" fill="#1A0F1E" stroke="#FF4D9D" stroke-width="8"/>
+    <circle cx="206" cy="168" r="22" fill="#1A0F1E" stroke="#FF4D9D" stroke-width="8"/>
+
+    <circle cx="0" cy="0" r="26" fill="#62E6C9"/>
+  </g>
+</svg>
