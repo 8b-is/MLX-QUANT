@@ -1,34 +1,50 @@
+"""Explicit email helper. Importing this module never sends a message."""
+
+import argparse
+import os
 import smtplib
+import ssl
+import sys
 from email.message import EmailMessage
+from pathlib import Path
 
-msg = EmailMessage()
-msg.set_content("""Hey 8b-wraith,
 
-We just hit a massive milestone with the MLX-QUANT project targeting Apple Silicon. 
+def main(argv=None):
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--send", action="store_true", required=True)
+    parser.add_argument("--smtp-host", required=True)
+    parser.add_argument("--smtp-port", type=int, default=587)
+    parser.add_argument("--from", dest="sender", required=True)
+    parser.add_argument("--to", dest="recipient", required=True)
+    parser.add_argument("--subject", required=True)
+    parser.add_argument("--body-file", type=Path, required=True)
+    args = parser.parse_args(argv)
+    if not 1 <= args.smtp_port <= 65535:
+        parser.error("--smtp-port must be between 1 and 65535")
 
-We successfully built the `hw-ultra` bare-metal abstraction crate. By mapping 16KB hardware pages and using a purely thread-local, unrolled Bump Allocator (with an 8-byte fast path), we bypassed the macOS kernel overhead entirely.
+    username = os.environ.get("MLX_SMTP_USERNAME")
+    password = os.environ.get("MLX_SMTP_PASSWORD")
+    if not username or not password:
+        parser.error("Set MLX_SMTP_USERNAME and MLX_SMTP_PASSWORD before sending")
 
-The latest benchmark on the M1 Pro for 10,000,000 allocations:
-- Standard OS Malloc: 333ms
-- hw-ultra Bare-Metal: 10.7ms (~80x Faster)
-
-How to use the new crate:
-1. Pull the repo: https://github.com/8b-is/hw-ultra
-2. For MLX-Quant tensor blocks, instantiate `hw_ultra::BumpAllocator::new()`.
-3. Use the `fast_alloc8()` function to stream aligned memory blocks directly.
-
-- P
-""")
-msg['Subject'] = 'MLX-QUANT / hw-ultra: 80x Bare-Metal Speedup on Apple Silicon'
-msg['From'] = 'peterlodri-sec@proton.me'
-msg['To'] = '8b-wraith@proton.me'
-
-try:
-    s = smtplib.SMTP('127.0.0.1', 1143, timeout=3)
-    s.starttls()
-    s.login('peterlodri-sec@proton.me', 'PSuDwwaSwRs7CGD_G6Plew')
-    s.send_message(msg)
-    s.quit()
+    try:
+        message = EmailMessage()
+        message.set_content(args.body_file.read_text(encoding="utf-8"))
+        message["From"] = args.sender
+        message["To"] = args.recipient
+        message["Subject"] = args.subject
+        context = ssl.create_default_context()
+        with smtplib.SMTP(args.smtp_host, args.smtp_port, timeout=10) as client:
+            client.starttls(context=context)
+            client.login(username, password)
+            client.send_message(message)
+    except (OSError, ValueError, smtplib.SMTPException) as error:
+        # SMTP error responses can echo credentials or private message data.
+        print(f"Email not sent ({type(error).__name__}).", file=sys.stderr)
+        return 1
     print("Sent")
-except Exception as e:
-    print(f"Failed: {e}")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
