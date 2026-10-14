@@ -30,6 +30,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Shared-memory ring regressions
+        run: python3 -m unittest discover -s scripts -p test_shm_ring.py -v
+
       - name: Golden-logit CLI regressions
         run: |
           python3 -m venv "$RUNNER_TEMP/mlx-golden-tests"
