@@ -55,25 +55,40 @@ class SharedMemoryRingBuffer:
     """
 
     def __init__(self, filepath: str, capacity: int = 1024, create: bool = False):
+        # Capacity describes a new ring only. Attach uses the on-disk geometry.
+        if create and (not isinstance(capacity, int) or not 0 < capacity < 2**32):
+            raise ValueError("Ring capacity must be a positive uint32")
         self.filepath = filepath
         self.capacity = capacity
-        self.total_size = HEADER_SIZE + (self.capacity * RECORD_SIZE)
         self.is_owner = create
+        self._fd = None
+        self._mmap = None
 
-        if create:
-            # Create or truncate file
-            with open(filepath, "wb") as f:
-                f.seek(self.total_size - 1)
-                f.write(b"\x00")
-            self._fd = os.open(filepath, os.O_RDWR)
-            self._mmap = mmap.mmap(self._fd, self.total_size, mmap.MAP_SHARED, mmap.PROT_READ | mmap.PROT_WRITE)
-            self._init_header()
-        else:
-            if not os.path.exists(filepath):
-                raise FileNotFoundError(f"Shared memory file {filepath} does not exist")
-            self._fd = os.open(filepath, os.O_RDWR)
-            self._mmap = mmap.mmap(self._fd, self.total_size, mmap.MAP_SHARED, mmap.PROT_READ | mmap.PROT_WRITE)
-            self._verify_header()
+        try:
+            flags = os.O_RDWR | (os.O_CREAT | os.O_TRUNC if create else 0)
+            self._fd = os.open(filepath, flags, 0o666)
+            if not create:
+                self.capacity = self._header_capacity(
+                    os.pread(self._fd, HEADER_SIZE, 0)
+                )
+            self.total_size = HEADER_SIZE + (self.capacity * RECORD_SIZE)
+            if create:
+                os.ftruncate(self._fd, self.total_size)
+            elif os.fstat(self._fd).st_size < self.total_size:
+                raise ValueError("Truncated ring file: capacity exceeds file size")
+            self._mmap = mmap.mmap(
+                self._fd,
+                self.total_size,
+                mmap.MAP_SHARED,
+                mmap.PROT_READ | mmap.PROT_WRITE,
+            )
+            if create:
+                self._init_header()
+            else:
+                self._verify_header()
+        except BaseException:
+            self._close_resources()
+            raise
 
     def _init_header(self):
         header_bytes = struct.pack(
@@ -89,13 +104,25 @@ class SharedMemoryRingBuffer:
         self._mmap[0:HEADER_SIZE] = header_bytes
         self._mmap.flush()
 
-    def _verify_header(self):
-        magic, cap, rsize, head, tail, flags, _ = struct.unpack(HEADER_FMT, self._mmap[0:HEADER_SIZE])
+    @staticmethod
+    def _header_capacity(header):
+        if len(header) != HEADER_SIZE:
+            raise ValueError("Truncated ring header")
+        magic, cap, rsize, _, _, _, _ = struct.unpack(HEADER_FMT, header)
         if magic != HEADER_MAGIC:
             raise ValueError(f"Invalid ring magic: {magic}")
         if rsize != RECORD_SIZE:
-            raise ValueError(f"Mismatched record size: expected {RECORD_SIZE}, got {rsize}")
-        self.capacity = cap
+            raise ValueError(
+                f"Mismatched record size: expected {RECORD_SIZE}, got {rsize}"
+            )
+        if cap == 0:
+            raise ValueError("Ring capacity must be positive")
+        return cap
+
+    def _verify_header(self):
+        # A producer may advance its pointers, but cannot resize an attached ring.
+        if self._header_capacity(self._mmap[0:HEADER_SIZE]) != self.capacity:
+            raise ValueError("Ring capacity changed during attach")
 
     def get_pointers(self) -> Tuple[int, int]:
         """Reads head and tail atomically from header."""
@@ -108,7 +135,14 @@ class SharedMemoryRingBuffer:
     def _set_tail(self, tail: int):
         self._mmap[24:32] = struct.pack("=Q", tail)
 
-    def push(self, event_type: int, node_id: int, degree: float, traversal_count: float, payload_trits: bytes = b"\x00" * 16) -> bool:
+    def push(
+        self,
+        event_type: int,
+        node_id: int,
+        degree: float,
+        traversal_count: float,
+        payload_trits: bytes = b"\x00" * 16,
+    ) -> bool:
         """
         Pushes a new record to the ring buffer.
         Returns True if successful, False if the ring buffer is full (backpressure).
@@ -152,7 +186,9 @@ class SharedMemoryRingBuffer:
             slot = (tail + i) % self.capacity
             offset = HEADER_SIZE + (slot * RECORD_SIZE)
             rec_data = self._mmap[offset : offset + RECORD_SIZE]
-            seq, ts, ev_type, node_id, deg, trav, trits, extra = struct.unpack(RECORD_FMT, rec_data)
+            seq, ts, ev_type, node_id, deg, trav, trits, extra = struct.unpack(
+                RECORD_FMT, rec_data
+            )
             records.append(
                 RingRecord(
                     seq=seq,
@@ -169,10 +205,19 @@ class SharedMemoryRingBuffer:
         self._set_tail(tail + count)
         return records
 
+    def _close_resources(self):
+        try:
+            if self._mmap is not None:
+                self._mmap.close()
+        finally:
+            self._mmap = None
+            if self._fd is not None:
+                fd, self._fd = self._fd, None
+                os.close(fd)
+
     def close(self):
         try:
-            self._mmap.close()
-            os.close(self._fd)
+            self._close_resources()
         except Exception:
             pass
         if self.is_owner and os.path.exists(self.filepath):
