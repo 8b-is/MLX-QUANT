@@ -168,16 +168,22 @@ Run it effortlessly with `uv`:
 uv run scripts/mlx_bench_matrix_yall.py
 ```
 
-### 19. Optimal Group-Wise L2 Ternary Quantizer & `@mx.compile` Metal Geodesic Step (`mlxQuant` + `mac++`)
+### 19. Optimal Group-Wise L2 Ternary Quantizer, 2-Bit Packing & SIMD-Group Metal Kernel (`mlxQuant` + `mac++`)
 *Code Ref: [`armillary_sphere_tensor.py`](./armillary_sphere_tensor.py) · [`test_armillary_ternary_bench.py`](./test_armillary_ternary_bench.py)*
 
-- **`quantize_ternary_optimal_groupwise`**: Closed-form L2-optimal per-group scale $\alpha_g = \frac{\sum_{i \in \text{active}} |w_i|}{\max(1, |\text{active}|)}$ at `group_size=64`, `threshold_factor=0.68`.
-  - **Weight MSE**: `1.039555` (naive global absmean) $\to$ **`0.429188`** (**`58.71%` MSE reduction**).
-  - **Perplexity Proxy $\exp(\text{LogitMSE})$**: `2.8166` $\to$ **`1.5355`**.
+- **`quantize_ternary_groupwise` (Alternating Voronoi / Lloyd-Max Coordinate Descent)**: Closed-form L2-optimal per-group scale $\alpha_g = \frac{\sum_{i \in \text{active}} |w_i|}{\max(1, |\text{active}|)}$ at `group_size=64` followed by 2-step alternating refinement ($\tau_g^{(t)} = 0.5\alpha_g^{(t)}$, $\alpha_g^{(t+1)} = \mathbb{E}[|w_g| \mid |w_g| > \tau_g^{(t)}]$).
+  - **Multi-Scale Weight MSE**: `1.039555` (naive global absmean) $\to$ `0.429188` (1-step groupwise) $\to$ **`0.421371`** (**`59.47%` MSE reduction vs naive**).
+  - **Heavy-Tailed Outlier Weight MSE**: `0.708068` (naive) $\to$ `0.478408` (1-step) $\to$ **`0.286356`** (**`40.14%` additional MSE reduction over 1-step groupwise**).
+  - **Perplexity Proxy $\exp(\text{LogitMSE})$**: `2.8166` $\to$ `1.5355` $\to$ **`1.5310`**.
+- **2-Bit Packed Ternary Storage (`pack_ternary_2bit` / `unpack_ternary_2bit`)**:
+  - Packs 4 trits (`{-1, 0, +1}` mapped to `{0, 1, 2}`) per `uint8` byte LSB-first with zero roundtrip loss: `2048.0 KB` (FP16) / `1024.0 KB` (INT8) $\to$ **`256.0 KB` (`8.00x` compression vs FP16, `4.00x` vs INT8)**.
+- **Fused Apple Silicon Metal 2-Bit Ternary Kernel (`metal_packed_ternary_matvec`)**:
+  - Custom `mx.fast.metal_kernel` with 32-lane SIMD-group (`simd_sum`) warp reductions that unpacks 4 trits/byte branchlessly in GPU registers (`int((packed >> s) & 0x3u) - 1`) without materializing unpacked weights in DRAM.
+  - **`4096x4096` MatVec Latency (`Device(gpu, 0)`)**: `3.291 ms` (unpack+matmul) | `0.614 ms` (dense FP16) $\to$ **`0.290 ms` (`11.34x` speedup vs unpack+matmul, `2.11x` speedup vs dense FP16)** at **`115.61 GB/s` effective FP16 weight bandwidth** (`16.28 GB/s` physical packed bandwidth, `max_err = 0.00024`).
 - **Apple Silicon Metal (`Device(gpu, 0)`) Fused Geodesic Step (`_compiled_geodesic_step`)**:
-  - Elides intermediate boolean mask materialization by fusing `mx.sum(mask)` inside `@mx.compile`: **`5.441 ms/iter` $\to$ `3.982 ms/iter` (`1.37x` speedup)** on `2048x2048` tensors, with **`12.80x` compression** (`16.00 MB` fp32 $\to$ `1.2500 MB` packed ternary + scales).
+  - Elides intermediate boolean mask materialization by fusing `mx.sum(mask)` inside `@mx.compile`: **`5.758 ms/iter` $\to$ `2.456 ms/iter` (`2.34x` speedup)** on `2048x2048` tensors, with **`12.80x` compression** (`16.00 MB` fp32 $\to$ `1.2500 MB` packed ternary + scales).
 ```bash
-PYTHONPATH=python .venv/bin/python test_armillary_ternary_bench.py
+uv run pytest test_armillary_ternary_bench.py -s
 ```
 
 
