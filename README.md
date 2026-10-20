@@ -168,6 +168,19 @@ Run it effortlessly with `uv`:
 uv run scripts/mlx_bench_matrix_yall.py
 ```
 
+### 19. Optimal Group-Wise L2 Ternary Quantizer & `@mx.compile` Metal Geodesic Step (`mlxQuant` + `mac++`)
+*Code Ref: [`armillary_sphere_tensor.py`](./armillary_sphere_tensor.py) · [`test_armillary_ternary_bench.py`](./test_armillary_ternary_bench.py)*
+
+- **`quantize_ternary_optimal_groupwise`**: Closed-form L2-optimal per-group scale $\alpha_g = \frac{\sum_{i \in \text{active}} |w_i|}{\max(1, |\text{active}|)}$ at `group_size=64`, `threshold_factor=0.68`.
+  - **Weight MSE**: `1.039555` (naive global absmean) $\to$ **`0.429188`** (**`58.71%` MSE reduction**).
+  - **Perplexity Proxy $\exp(\text{LogitMSE})$**: `2.8166` $\to$ **`1.5355`**.
+- **Apple Silicon Metal (`Device(gpu, 0)`) Fused Geodesic Step (`_compiled_geodesic_step`)**:
+  - Elides intermediate boolean mask materialization by fusing `mx.sum(mask)` inside `@mx.compile`: **`5.441 ms/iter` $\to$ `3.982 ms/iter` (`1.37x` speedup)** on `2048x2048` tensors, with **`12.80x` compression** (`16.00 MB` fp32 $\to$ `1.2500 MB` packed ternary + scales).
+```bash
+PYTHONPATH=python .venv/bin/python test_armillary_ternary_bench.py
+```
+
+
 
 ---
 
