@@ -10,7 +10,7 @@
   "matrix_size": "4096x4096 (FP32)",
   "benchmarks": {
     "CPU (PyTorch)": {
-      "time_ms": 768.87,
+      "time_ms": 755.34,
       "status": "OK"
     },
     "NVIDIA CUDA": {
