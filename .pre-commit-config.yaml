@@ -3,12 +3,19 @@ repos:
     rev: v6.0.0
     hooks:
     -   id: check-yaml
+    # Large numeric arrays hit clang-format's slow path; keep this fixture
+    # formatted and validated with the JSON-native hook instead.
+    -   id: pretty-format-json
+        files: ^scripts/quantal_ref_logits\.json$
+        args: [--autofix, --no-sort-keys, --no-ensure-ascii]
     # -   id: end-of-file-fixer
     # -   id: trailing-whitespace
 -   repo: https://github.com/pre-commit/mirrors-clang-format
     rev: v21.1.8
     hooks:
     -   id: clang-format
+        # The JSON-native hook above owns this exact file.
+        exclude: ^scripts/quantal_ref_logits\.json$
 # Using this mirror lets us use mypyc-compiled black, which is about 2x faster
 -   repo: https://github.com/psf/black-pre-commit-mirror
     rev: 26.1.0
