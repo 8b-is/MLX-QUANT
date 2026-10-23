@@ -125,7 +125,11 @@ def derive_dims(w: dict) -> tuple[int, int, int, int]:
     """Derive (vocab, hidden, n_layers, intermediate) from checkpoint keys."""
     emb = w[EMBED_KEY]
     vocab, hidden = int(emb.shape[0]), int(emb.shape[1])
-    layer_keys = [k for k in w if k.startswith("model.layers.") and k.endswith("input_layernorm.weight")]
+    layer_keys = [
+        k
+        for k in w
+        if k.startswith("model.layers.") and k.endswith("input_layernorm.weight")
+    ]
     n_layers = max((int(k.split(".")[2]) for k in layer_keys), default=-1) + 1
     if n_layers < 1:
         sys.exit("error: no model.layers.*.input_layernorm.weight keys in checkpoint")
@@ -168,14 +172,20 @@ def read_bf16_tensor(path: Path, header: dict, key: str) -> np.ndarray:
 def main():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--checkpoint", required=True, help="trained quantal safetensors")
-    p.add_argument("--out-dir", required=True, help="pocoo demo dir (m*.json + index.json live here)")
+    p.add_argument(
+        "--out-dir",
+        required=True,
+        help="pocoo demo dir (m*.json + index.json live here)",
+    )
     args = p.parse_args()
 
     out = Path(args.out_dir)
     out.mkdir(parents=True, exist_ok=True)
     idx_path = out / "index.json"
     if not idx_path.exists():
-        sys.exit(f"error: {idx_path} not found — run export_quantal_checkpoint.py first")
+        sys.exit(
+            f"error: {idx_path} not found — run export_quantal_checkpoint.py first"
+        )
 
     print(f"  mlx: {getattr(mx, '__version__', 'unknown')}")
     print(f"  metal: {mx.metal.is_available()}")
@@ -189,22 +199,27 @@ def main():
 
     vocab_size, hidden_size, n_layers, intermediate_size = derive_dims(w)
     expected_norms = 2 * n_layers + 1
-    print(f"   derived: vocab={vocab_size} hidden={hidden_size} layers={n_layers} "
-          f"intermediate={intermediate_size} norms={expected_norms}")
+    print(
+        f"   derived: vocab={vocab_size} hidden={hidden_size} layers={n_layers} "
+        f"intermediate={intermediate_size} norms={expected_norms}"
+    )
 
     # --- (a) token embeddings -------------------------------------------------
     print("2. exporting embeddings.f16 ...")
     emb = w[EMBED_KEY]
-    assert tuple(emb.shape) == (vocab_size, hidden_size), (
-        f"unexpected embed shape {emb.shape}"
-    )
+    assert tuple(emb.shape) == (
+        vocab_size,
+        hidden_size,
+    ), f"unexpected embed shape {emb.shape}"
     print(f"   {EMBED_KEY}: shape={emb.shape} dtype={emb.dtype}")
     emb_f16 = emb.astype(mx.float16)
     emb_bytes = np.asarray(emb_f16, dtype="<f2").tobytes()
     emb_path = out / EMBED_FNAME
     emb_path.write_bytes(emb_bytes)
     emb_size = emb_path.stat().st_size
-    print(f"   wrote {emb_path} ({emb_size:,} bytes, shape [{vocab_size}, {hidden_size}])")
+    print(
+        f"   wrote {emb_path} ({emb_size:,} bytes, shape [{vocab_size}, {hidden_size}])"
+    )
 
     # --- (b) RMSNorm vectors --------------------------------------------------
     print("3. exporting norms.f32 ...")
@@ -224,8 +239,12 @@ def main():
     norms_path = out / NORMS_FNAME
     norms_path.write_bytes(norms_bytes)
     norms_size = norms_path.stat().st_size
-    print(f"   wrote {norms_path} ({norms_size:,} bytes, shape [{expected_norms}, {hidden_size}])")
-    print(f"   ordering: for i in 0..{n_layers - 1}: input_layernorm(i), post_attention_layernorm(i); then final model.norm.weight")
+    print(
+        f"   wrote {norms_path} ({norms_size:,} bytes, shape [{expected_norms}, {hidden_size}])"
+    )
+    print(
+        f"   ordering: for i in 0..{n_layers - 1}: input_layernorm(i), post_attention_layernorm(i); then final model.norm.weight"
+    )
 
     # --- (b2) Qwen3-only q_norm/k_norm per-head RMSNorm gains -----------------
     qk_rows = []
@@ -249,10 +268,14 @@ def main():
         qk_path = out / QK_NORMS_FNAME
         qk_path.write_bytes(qk_bytes)
         qk_size = qk_path.stat().st_size
-        print(f"   [qwen3] wrote {qk_path} ({qk_size:,} bytes, shape [{2 * n_layers}, {qk_head_dim}]) "
-              f"row order: per layer q_norm(i), k_norm(i)")
+        print(
+            f"   [qwen3] wrote {qk_path} ({qk_size:,} bytes, shape [{2 * n_layers}, {qk_head_dim}]) "
+            f"row order: per layer q_norm(i), k_norm(i)"
+        )
     else:
-        print("   no q_norm/k_norm in checkpoint (Qwen2.5-style) — skipping qk_norms.f32")
+        print(
+            "   no q_norm/k_norm in checkpoint (Qwen2.5-style) — skipping qk_norms.f32"
+        )
 
     # --- (b3) per-projection BitLinear gains + biases (faithful forward) -----
     # Legacy (pre-deployed-forward) checkpoints carry these. Deployed-forward
@@ -281,25 +304,33 @@ def main():
             for proj in BIAS_PROJS:
                 bkey = f"model.layers.{i}.{proj}.bias"
                 if bkey in header:
-                    bias_rows.append(mx.array(read_bf16_tensor(Path(args.checkpoint), header, bkey)))
+                    bias_rows.append(
+                        mx.array(read_bf16_tensor(Path(args.checkpoint), header, bkey))
+                    )
         gains = mx.concatenate(gain_rows, axis=0)
         gains_bytes = np.asarray(gains, dtype="<f4").tobytes()
         gains_path = out / GAINS_FNAME
         gains_path.write_bytes(gains_bytes)
         gains_size = gains_path.stat().st_size
         per_layer = 6 * hidden_size + intermediate_size
-        print(f"   wrote {gains_path} ({gains_size:,} bytes, "
-              f"{gains.shape[0]} floats = {n_layers} x ({6}*{hidden_size}+{intermediate_size}))")
+        print(
+            f"   wrote {gains_path} ({gains_size:,} bytes, "
+            f"{gains.shape[0]} floats = {n_layers} x ({6}*{hidden_size}+{intermediate_size}))"
+        )
         if bias_rows:
             biases = mx.concatenate(bias_rows, axis=0)
             biases_bytes = np.asarray(biases, dtype="<f4").tobytes()
             biases_path = out / BIASES_FNAME
             biases_path.write_bytes(biases_bytes)
             biases_size = biases_path.stat().st_size
-            print(f"   wrote {biases_path} ({biases_size:,} bytes, {biases.shape[0]} floats)")
+            print(
+                f"   wrote {biases_path} ({biases_size:,} bytes, {biases.shape[0]} floats)"
+            )
     else:
-        print("   [bitlinear] no per-projection gains in checkpoint "
-              "(deployed-forward) — skipping gains.f32/biases.f32")
+        print(
+            "   [bitlinear] no per-projection gains in checkpoint "
+            "(deployed-forward) — skipping gains.f32/biases.f32"
+        )
 
     # --- hashes + index.json --------------------------------------------------
     print("4. hashing assets...")
@@ -343,14 +374,19 @@ def main():
             "bytes": gains_size,
             "sha256": sha256_of(gains_path),
             "source": f"{args.checkpoint} per-projection BitLinear RMSNorm gains "
-                      f"(faithful forward, BF16->FP32)",
+            f"(faithful forward, BF16->FP32)",
         }
     if biases_path is not None:
         assets[BIASES_FNAME] = {
             "dtype": "f32",
-            "shape": [sum(int(header[f"model.layers.{i}.{proj}.bias"]["shape"][0])
-                          for i in range(n_layers) for proj in BIAS_PROJS
-                          if f"model.layers.{i}.{proj}.bias" in header)],
+            "shape": [
+                sum(
+                    int(header[f"model.layers.{i}.{proj}.bias"]["shape"][0])
+                    for i in range(n_layers)
+                    for proj in BIAS_PROJS
+                    if f"model.layers.{i}.{proj}.bias" in header
+                )
+            ],
             "bytes": biases_size,
             "sha256": sha256_of(biases_path),
             "source": f"{args.checkpoint} q/k/v projection biases (faithful forward, BF16->FP32)",

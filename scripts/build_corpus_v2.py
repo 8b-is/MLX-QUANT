@@ -89,9 +89,9 @@ DATASET_CAPS = {
     "Open-Orca/SlimOrca": 1200,
     "teknium/OpenHermes-2.5": 1200,
     # --- v2 new (security/agentic/instruction-relevant) ---
-    "Anthropic/hh-rlhf": 1500,                      # v2 new (helpful+harmless)
-    "databricks/databricks-dolly-15k": 1000,        # v2 new
-    "HuggingFaceH4/no_robots": 1500,                # v2 new
+    "Anthropic/hh-rlhf": 1500,  # v2 new (helpful+harmless)
+    "databricks/databricks-dolly-15k": 1000,  # v2 new
+    "HuggingFaceH4/no_robots": 1500,  # v2 new
 }
 
 # datasets whose default config is not the only useful one: stream each config
@@ -154,7 +154,15 @@ def extract_text(obj) -> str | None:
         return t.strip()
     # 2. chat-list fields (messages / conversation / conversations / dialogue /
     #    dialog / chat / turns)
-    for key in ("messages", "conversation", "conversations", "dialogue", "dialog", "chat", "turns"):
+    for key in (
+        "messages",
+        "conversation",
+        "conversations",
+        "dialogue",
+        "dialog",
+        "chat",
+        "turns",
+    ):
         v = obj.get(key)
         if isinstance(v, list) and v and isinstance(v[0], dict):
             flat = flatten_messages(v)
@@ -167,7 +175,12 @@ def extract_text(obj) -> str | None:
     #    single prompt field AND a response without hitting the chat tiers)
     inst = obj.get("instruction") or obj.get("prompt")
     resp = obj.get("response") or obj.get("completion") or obj.get("output")
-    if isinstance(inst, str) and inst.strip() and isinstance(resp, str) and resp.strip():
+    if (
+        isinstance(inst, str)
+        and inst.strip()
+        and isinstance(resp, str)
+        and resp.strip()
+    ):
         return f"Instruction: {inst.strip()}\nResponse: {resp.strip()}"
     # 4. direct prompt-ish strings
     for key in ("prompt", "instruction", "jailbreak_query", "content"):
@@ -177,8 +190,16 @@ def extract_text(obj) -> str | None:
     # 5. Nemotron-RL `injection` dict (goal + target_tool + context)
     inj = obj.get("injection")
     if isinstance(inj, dict):
-        parts = [str(inj.get(k, "")).strip() for k in
-                 ("goal", "target_tool", "attack_category", "injection_vector", "context")]
+        parts = [
+            str(inj.get(k, "")).strip()
+            for k in (
+                "goal",
+                "target_tool",
+                "attack_category",
+                "injection_vector",
+                "context",
+            )
+        ]
         txt = "\n".join(p for p in parts if p)
         if txt:
             return txt
@@ -223,20 +244,40 @@ def stream_records(dataset_id: str, cache_dir: str, config=None):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("--out", default="data/train_ultra_qwen3_v2.jsonl",
-                    help="output jsonl path (default: data/train_ultra_qwen3_v2.jsonl)")
-    ap.add_argument("--report", default="data/train_ultra_qwen3_v2_corpus.json",
-                    help="per-dataset stats + totals (default: data/train_ultra_qwen3_v2_corpus.json)")
-    ap.add_argument("--ultra3", default="data/train_ultra3.jsonl",
-                    help="previous corpus to merge uncapped (default: data/train_ultra3.jsonl)")
-    ap.add_argument("--max-per-dataset", type=int, default=None,
-                    help="safety override: cap every dataset at min(its cap, N)")
+    ap.add_argument(
+        "--out",
+        default="data/train_ultra_qwen3_v2.jsonl",
+        help="output jsonl path (default: data/train_ultra_qwen3_v2.jsonl)",
+    )
+    ap.add_argument(
+        "--report",
+        default="data/train_ultra_qwen3_v2_corpus.json",
+        help="per-dataset stats + totals (default: data/train_ultra_qwen3_v2_corpus.json)",
+    )
+    ap.add_argument(
+        "--ultra3",
+        default="data/train_ultra3.jsonl",
+        help="previous corpus to merge uncapped (default: data/train_ultra3.jsonl)",
+    )
+    ap.add_argument(
+        "--max-per-dataset",
+        type=int,
+        default=None,
+        help="safety override: cap every dataset at min(its cap, N)",
+    )
     ap.add_argument("--seed", type=int, default=42)
-    ap.add_argument("--stream-chunk", type=int, default=1000,
-                    help="samples per write batch flushed to the output jsonl")
-    ap.add_argument("--cache-dir", default="/tmp/hf-datasets-cache",
-                    help="ephemeral datasets/hub cache dir (default: /tmp/hf-datasets-cache) — "
-                         "keeps the box's root HF cache untouched")
+    ap.add_argument(
+        "--stream-chunk",
+        type=int,
+        default=1000,
+        help="samples per write batch flushed to the output jsonl",
+    )
+    ap.add_argument(
+        "--cache-dir",
+        default="/tmp/hf-datasets-cache",
+        help="ephemeral datasets/hub cache dir (default: /tmp/hf-datasets-cache) — "
+        "keeps the box's root HF cache untouched",
+    )
     args = ap.parse_args()
 
     # disk-bounded: block the Xet storage backend (it spools large chunk caches)

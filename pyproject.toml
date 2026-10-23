@@ -5,3 +5,7 @@ requires = [
   "typing_extensions",
 ]
 build-backend = "setuptools.build_meta"
+
+[tool.isort]
+# Local CUDA extensions must remain after torch, which loads their libraries.
+known_first_party = ["add_one_ext", "matmul_ext"]

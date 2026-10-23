@@ -42,7 +42,6 @@ import mlx.core as mx
 import mlx.nn as nn
 import numpy as np
 
-
 # ---------------------------------------------------------------------------
 # 1. Data helpers (text field; dynamic per-batch padding, bucketed to *64)
 # ---------------------------------------------------------------------------
@@ -142,7 +141,9 @@ def stratified_val_split(samples: list[str], tokenizer, val_size: int, seed: int
 # ---------------------------------------------------------------------------
 
 
-def evaluate(model, tokenizer, samples: list[str], max_len: int, batch_size: int = 4) -> float:
+def evaluate(
+    model, tokenizer, samples: list[str], max_len: int, batch_size: int = 4
+) -> float:
     total = 0.0
     n = 0
     for i in range(0, len(samples), batch_size):
@@ -181,7 +182,9 @@ def main():
     print(f"  model:     {args.model}")
     print(f"  data:      {args.data}")
     print(f"  max_len:   {args.max_len} (dynamic pad, x64 buckets)")
-    print(f"  batch:     {args.batch_size}  val_size: {args.val_size}  seed: {args.seed}")
+    print(
+        f"  batch:     {args.batch_size}  val_size: {args.val_size}  seed: {args.seed}"
+    )
     print(f"  metal:     {mx.metal.is_available()}")
 
     print("1. loading base model (plain mlx_lm weights)...")
@@ -206,7 +209,9 @@ def main():
     print(f"   val {len(val_samples)} (stratified, seed {args.seed})")
 
     print("4. evaluating masked CE on the val split...")
-    floor = evaluate(model, tokenizer, val_samples, args.max_len, batch_size=args.batch_size)
+    floor = evaluate(
+        model, tokenizer, val_samples, args.max_len, batch_size=args.batch_size
+    )
     print(f"  FP16 FLOOR ({args.model}): {floor:.4f}")
     print(f"  FLOOR_MASKED_CE={floor:.4f}")
 

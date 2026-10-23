@@ -1,25 +1,35 @@
 # Copyright © 2026 Peter Lodri / MLX-QUANT Contributors.
 # Comprehensive Benchmark: Fused Metal Kernel vs Standard MLX vs Python Baseline
 
-import time
 import math
+import time
+
 import mlx.core as mx
 from mlx.quant.armillary import armillary_sparse_update_metal
 
 
-def standard_mlx_sparse_update(weights, grad, density, phi, lr=0.01, base_tau=0.005, decay_rate=0.001, growth_rate=0.05):
+def standard_mlx_sparse_update(
+    weights,
+    grad,
+    density,
+    phi,
+    lr=0.01,
+    base_tau=0.005,
+    decay_rate=0.001,
+    growth_rate=0.05,
+):
     """Unfused multi-pass MLX graph execution."""
     sin_phi = mx.sin(phi)
     tau = base_tau * (1.0 + density * mx.abs(sin_phi))
     mask = mx.abs(grad) > tau
-    
+
     # Weight update
     new_weights = mx.where(mask, weights - lr * grad, weights)
-    
+
     # Density update
     d_decayed = density * (1.0 - decay_rate)
     new_density = mx.where(mask, d_decayed + growth_rate * mx.abs(grad), d_decayed)
-    
+
     return new_weights, new_density, mask.astype(mx.float32)
 
 
@@ -27,7 +37,9 @@ def benchmark_armillary_sparse_update():
     print("=" * 80)
     print(" 🪐 MLX-QUANT ARMILLARY SPHERE FUSED METAL BENCHMARK 🪐")
     print("=" * 80)
-    print(f"{'Matrix Shape':<18} | {'Unfused MLX (ms)':<18} | {'Fused Metal (ms)':<18} | {'Speedup':<10} | {'Sparsity':<10}")
+    print(
+        f"{'Matrix Shape':<18} | {'Unfused MLX (ms)':<18} | {'Fused Metal (ms)':<18} | {'Speedup':<10} | {'Sparsity':<10}"
+    )
     print("-" * 80)
 
     shapes = [
@@ -74,7 +86,9 @@ def benchmark_armillary_sparse_update():
         speedup = unfused_ms / metal_ms
         sparsity = (1.0 - mx.sum(m_m).item() / m_m.size) * 100.0
 
-        print(f"{shape_str:<18} | {unfused_ms:>16.3f}ms | {metal_ms:>16.3f}ms | {speedup:>8.2f}x | {sparsity:>8.2f}%")
+        print(
+            f"{shape_str:<18} | {unfused_ms:>16.3f}ms | {metal_ms:>16.3f}ms | {speedup:>8.2f}x | {sparsity:>8.2f}%"
+        )
 
     print("=" * 80)
 
