@@ -1,0 +1,3 @@
+[submodule "mlx-quant-linux/hardware-crate"]
+	path = mlx-quant-linux/hardware-crate
+	url = https://github.com/8b-is/hw-ultra.git
