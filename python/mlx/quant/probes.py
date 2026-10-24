@@ -4,12 +4,14 @@
 import math
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple
+
 import mlx.core as mx
 
 
 @dataclass
 class DestructiveChannelMetrics:
     """Telemetry metrics from passing holographic weights through a quantization channel."""
+
     regime: str
     carrier_amplitude: float
     original_power: float
@@ -20,7 +22,9 @@ class DestructiveChannelMetrics:
     recovered_phase_coherence: float
 
 
-def compute_snr_db(signal: mx.array, reconstructed: mx.array, eps: float = 1e-10) -> float:
+def compute_snr_db(
+    signal: mx.array, reconstructed: mx.array, eps: float = 1e-10
+) -> float:
     """Computes Signal-to-Noise Ratio in decibels."""
     sig_power = float(mx.sum(mx.square(signal)).item())
     noise_power = float(mx.sum(mx.square(signal - reconstructed)).item())
@@ -88,11 +92,23 @@ class HolographicDestructiveProbe:
 
                 # Compute Metrics
                 snr = compute_snr_db(holographic_carrier, extracted_carrier)
-                
+
                 # Weight MSE & Cosine Similarity
                 w_mse = float(mx.mean(mx.square(modulated_w - degraded_w)).item())
-                w_norm_prod = float((mx.sqrt(mx.sum(mx.square(modulated_w))) * mx.sqrt(mx.sum(mx.square(degraded_w)))).item())
-                cos_sim = max(-1.0, min(1.0, float(mx.sum(modulated_w * degraded_w).item()) / (w_norm_prod + 1e-9)))
+                w_norm_prod = float(
+                    (
+                        mx.sqrt(mx.sum(mx.square(modulated_w)))
+                        * mx.sqrt(mx.sum(mx.square(degraded_w)))
+                    ).item()
+                )
+                cos_sim = max(
+                    -1.0,
+                    min(
+                        1.0,
+                        float(mx.sum(modulated_w * degraded_w).item())
+                        / (w_norm_prod + 1e-9),
+                    ),
+                )
 
                 # Phase coherence (normalized dot product in Fourier space)
                 f_orig = mx.fft.rfft2(holographic_carrier)
@@ -100,15 +116,26 @@ class HolographicDestructiveProbe:
                 orig_abs = mx.abs(f_orig)
                 recv_abs = mx.abs(f_recv)
                 coherence = float(mx.sum(orig_abs * recv_abs).item()) / (
-                    float(mx.sqrt(mx.sum(mx.square(orig_abs)) * mx.sum(mx.square(recv_abs))).item()) + 1e-9
+                    float(
+                        mx.sqrt(
+                            mx.sum(mx.square(orig_abs)) * mx.sum(mx.square(recv_abs))
+                        ).item()
+                    )
+                    + 1e-9
                 )
 
                 results.append(
                     DestructiveChannelMetrics(
                         regime=regime,
                         carrier_amplitude=amp,
-                        original_power=float(mx.mean(mx.square(holographic_carrier)).item()),
-                        error_power=float(mx.mean(mx.square(holographic_carrier - extracted_carrier)).item()),
+                        original_power=float(
+                            mx.mean(mx.square(holographic_carrier)).item()
+                        ),
+                        error_power=float(
+                            mx.mean(
+                                mx.square(holographic_carrier - extracted_carrier)
+                            ).item()
+                        ),
                         reconstruction_snr_db=snr,
                         weight_cosine_similarity=cos_sim,
                         weight_mse=w_mse,
@@ -127,13 +154,21 @@ class CorticalLogMapTelemetry:
         y = beta * r * theta / (w0 + eps * r)
     """
 
-    def __init__(self, w0: float = 0.087, eps: float = 0.051, alpha: float = 1.0, beta: float = 1.0):
+    def __init__(
+        self,
+        w0: float = 0.087,
+        eps: float = 0.051,
+        alpha: float = 1.0,
+        beta: float = 1.0,
+    ):
         self.w0 = w0
         self.eps = eps
         self.alpha = alpha
         self.beta = beta
 
-    def transform_s2_to_cortical(self, theta: mx.array, phi: mx.array) -> Tuple[mx.array, mx.array]:
+    def transform_s2_to_cortical(
+        self, theta: mx.array, phi: mx.array
+    ) -> Tuple[mx.array, mx.array]:
         """
         Projects S^2 spherical angles (colatitude phi as radial r) into cortical V1 coordinates.
         Pure observer transform downstream of compute kernel.
@@ -144,7 +179,9 @@ class CorticalLogMapTelemetry:
         y = (self.beta * r * theta) / (self.w0 + self.eps * r)
         return x, y
 
-    def compute_planform_spectrum(self, cortical_x: mx.array, cortical_y: mx.array, activations: mx.array) -> Dict[str, float]:
+    def compute_planform_spectrum(
+        self, cortical_x: mx.array, cortical_y: mx.array, activations: mx.array
+    ) -> Dict[str, float]:
         """
         Computes Klüver mode spectrum from cortical activations (stripes vs spirals vs lattices).
         """

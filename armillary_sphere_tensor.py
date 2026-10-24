@@ -1,5 +1,6 @@
 import math
 import time
+
 import mlx.core as mx
 
 
@@ -67,7 +68,13 @@ class ArmillarySphereTensor:
     geodesics (rings) of the sphere rather than across a flat Cartesian grid.
     """
 
-    def __init__(self, in_features: int, out_features: int, num_rings: int = 12, group_size: int = 64):
+    def __init__(
+        self,
+        in_features: int,
+        out_features: int,
+        num_rings: int = 12,
+        group_size: int = 64,
+    ):
         self.in_features = in_features
         self.out_features = out_features
         self.num_rings = num_rings
@@ -75,11 +82,15 @@ class ArmillarySphereTensor:
 
         # Standard flat weight initialization
         limit = math.sqrt(6 / (in_features + out_features))
-        flat_weights = mx.random.uniform(-limit, limit, shape=(out_features, in_features))
+        flat_weights = mx.random.uniform(
+            -limit, limit, shape=(out_features, in_features)
+        )
         self.weights = flat_weights
 
         # Create the Armillary spatial mapping (static for the layer)
-        self.theta = mx.random.uniform(0, 2 * math.pi, shape=(out_features, in_features))
+        self.theta = mx.random.uniform(
+            0, 2 * math.pi, shape=(out_features, in_features)
+        )
         self.phi = mx.random.uniform(0, math.pi, shape=(out_features, in_features))
 
         # Density field for Holographic Steganography
@@ -110,7 +121,9 @@ class ArmillarySphereTensor:
             x, self.w_q, self.scales, group_size=self.group_size, bits=2, mode="ternary"
         )
 
-    def sparse_recursive_update(self, grad: mx.array, lr: float = 0.01, base_tau: float = 0.005) -> float:
+    def sparse_recursive_update(
+        self, grad: mx.array, lr: float = 0.01, base_tau: float = 0.005
+    ) -> float:
         """Eager baseline sparse recursion update."""
         tau = self.stigmergic_threshold(base_tau)
         mask = mx.abs(grad) > tau
@@ -137,5 +150,7 @@ if __name__ == "__main__":
     sphere = ArmillarySphereTensor(in_features=1024, out_features=1024, num_rings=24)
     mock_grad = mx.random.normal(shape=(1024, 1024))
     for epoch in range(3):
-        sparsity = sphere.sparse_recursive_update_compiled(grad=mock_grad, lr=0.1, base_tau=1.5)
+        sparsity = sphere.sparse_recursive_update_compiled(
+            grad=mock_grad, lr=0.1, base_tau=1.5
+        )
         print(f"  Epoch {epoch+1}: Tensor Sparsity = {sparsity*100:.2f}%")

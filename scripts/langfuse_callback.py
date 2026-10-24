@@ -25,8 +25,14 @@ def langfuse_enabled():
     return all(os.environ.get(k) for k in _ENV_VARS)
 
 
-def langfuse_trace(name, model=None, input_preview=None, output_preview=None,
-                   duration_ms=None, metadata=None):
+def langfuse_trace(
+    name,
+    model=None,
+    input_preview=None,
+    output_preview=None,
+    duration_ms=None,
+    metadata=None,
+):
     """POST a trace to Langfuse. Fire-and-forget on a daemon thread — never
     blocks the caller; all errors are swallowed. No-op when disabled."""
     if not langfuse_enabled():
@@ -71,6 +77,7 @@ def langfuse_trace(name, model=None, input_preview=None, output_preview=None,
 def langfuse_trace_benchmark(fn):
     """Decorator: record a benchmark's name + wall time as a Langfuse trace.
     No-op (and no network) unless the LANGFUSE_* env vars are set."""
+
     @wraps(fn)
     def wrapper(*args, **kwargs):
         # Opt-in gating: run the benchmark untouched when tracing is off.
@@ -85,13 +92,15 @@ def langfuse_trace_benchmark(fn):
             output_preview=str(result)[:200] if result is not None else None,
         )
         return result
+
     return wrapper
 
 
 def _post_trace(host, public_key, secret_key, payload):
     body = json.dumps(payload).encode("utf-8")
-    credentials = base64.b64encode(
-        f"{public_key}:{secret_key}".encode("utf-8")).decode("ascii")
+    credentials = base64.b64encode(f"{public_key}:{secret_key}".encode("utf-8")).decode(
+        "ascii"
+    )
     req = urllib.request.Request(
         host.rstrip("/") + "/api/public/trace",
         data=body,

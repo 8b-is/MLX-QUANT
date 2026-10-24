@@ -9,9 +9,9 @@ from .armillary import ArmillarySphereLinear, armillary_sparse_update_metal
 from .bitnet import (
     TernaryLinear,
     convert_model_to_bitnet,
+    matmul_ternary_cpu_fallback,
     quantize_ternary_numpy,
     unpack_ternary_numpy,
-    matmul_ternary_cpu_fallback,
 )
 from .microstructure import simulate_l2_orderbook, vpin_toxicity
 from .portfolio import markowitz_efficient_frontier
@@ -23,8 +23,8 @@ from .probes import (
     quantize_to_regime,
 )
 from .shm_ring import RingRecord, SharedMemoryRingBuffer
-from .stochastic import black_scholes_greeks, simulate_gbm
 from .stigmergy import StigmergicAccumulator, StigmergySnapshot
+from .stochastic import black_scholes_greeks, simulate_gbm
 
 __all__ = [
     "ArmillarySphereLinear",
@@ -49,5 +49,3 @@ __all__ = [
     "unpack_ternary_numpy",
     "matmul_ternary_cpu_fallback",
 ]
-
-

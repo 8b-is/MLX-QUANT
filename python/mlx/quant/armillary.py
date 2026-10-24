@@ -3,6 +3,7 @@
 
 import math
 from typing import Tuple
+
 import mlx.core as mx
 import mlx.nn as nn
 
@@ -161,7 +162,9 @@ class ArmillarySphereLinear(nn.Module):
         # Fixed celestial coordinates on S^2 for each synaptic connection
         # theta: Azimuth / Longitude [0, 2*pi)
         # phi: Colatitude / Polar angle [0, pi]
-        self.theta = mx.random.uniform(0.0, 2.0 * math.pi, shape=(out_features, in_features))
+        self.theta = mx.random.uniform(
+            0.0, 2.0 * math.pi, shape=(out_features, in_features)
+        )
         self.phi = mx.random.uniform(0.0, math.pi, shape=(out_features, in_features))
 
         # Stigmergic density field (inertial mass)

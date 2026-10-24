@@ -6,6 +6,7 @@ import os
 import sys
 import tempfile
 import time
+
 import mlx.core as mx
 from mlx.quant import (
     ArmillarySphereLinear,
@@ -23,7 +24,9 @@ def run_vaimshuk_pipeline(verbose: bool = True):
         print("=" * 80)
 
     # 1. Initialize Bounded Shared-Memory Ring Buffer (Approaching Substrate Handshake)
-    tmp_shm = os.path.join(tempfile.gettempdir(), f"vaimshuk_{int(time.time()*1000)}.shm")
+    tmp_shm = os.path.join(
+        tempfile.gettempdir(), f"vaimshuk_{int(time.time()*1000)}.shm"
+    )
     ring = SharedMemoryRingBuffer(tmp_shm, capacity=512, create=True)
     if verbose:
         print(f"[Stage 1: SHM Handshake] Attached to bounded memory ring at {tmp_shm}")
@@ -48,12 +51,16 @@ def run_vaimshuk_pipeline(verbose: bool = True):
     probe = HolographicDestructiveProbe(carrier_amplitudes=[0.01, 0.05, 0.1])
 
     if verbose:
-        print(f"[Stage 2: Manifold Init] Armillary S^2 ({out_dim}x{in_dim}) initialized on Apple Silicon GPU")
+        print(
+            f"[Stage 2: Manifold Init] Armillary S^2 ({out_dim}x{in_dim}) initialized on Apple Silicon GPU"
+        )
 
     # 3. Simulate Swarm Ingestion via SHM Ring
     num_events = 20
     if verbose:
-        print(f"[Stage 3: Ingestion] Producing {num_events} graph traversal events into SHM ring...")
+        print(
+            f"[Stage 3: Ingestion] Producing {num_events} graph traversal events into SHM ring..."
+        )
 
     for i in range(num_events):
         degree = 5.0 + (i % 7) * 4.0
@@ -79,7 +86,9 @@ def run_vaimshuk_pipeline(verbose: bool = True):
     # Take an immutable snapshot
     snapshot_v1 = accumulator.create_snapshot()
     if verbose:
-        print(f"  -> Snapshot Version {snapshot_v1.version}: Mean Density = {snapshot_v1.mean_density:.4f}, Max = {snapshot_v1.max_density:.4f}, Entropy = {snapshot_v1.entropy:.4f}")
+        print(
+            f"  -> Snapshot Version {snapshot_v1.version}: Mean Density = {snapshot_v1.mean_density:.4f}, Max = {snapshot_v1.max_density:.4f}, Entropy = {snapshot_v1.entropy:.4f}"
+        )
 
     # Bind accumulator density to the Armillary layer's gravitational field
     layer.density = mx.array(accumulator.density)
@@ -93,34 +102,50 @@ def run_vaimshuk_pipeline(verbose: bool = True):
     sparsity, energy_dissipated = layer.update_sparse_metal(grad=grad, lr=0.05)
 
     if verbose:
-        print(f"  -> Sparse Update Results: Sparsity = {sparsity*100:.2f}%, Energy Dissipation = {energy_dissipated:.4f}")
+        print(
+            f"  -> Sparse Update Results: Sparsity = {sparsity*100:.2f}%, Energy Dissipation = {energy_dissipated:.4f}"
+        )
 
     # 6. Telemetry: Destructive Quantization Channel Probing & Cortical Planform Spectrum
     if verbose:
-        print("[Stage 6: Telemetry Probes] Evaluating destructive channel & cortical log-map...")
+        print(
+            "[Stage 6: Telemetry Probes] Evaluating destructive channel & cortical log-map..."
+        )
 
     holographic_carrier = layer.holographic_phase
-    metrics = probe.evaluate_channel(base_weights=layer.weight, holographic_carrier=holographic_carrier)
+    metrics = probe.evaluate_channel(
+        base_weights=layer.weight, holographic_carrier=holographic_carrier
+    )
 
     if verbose:
         print("-" * 80)
-        print(f"{'Channel Regime':<16} | {'Carrier Amp':<12} | {'Reconstruction SNR (dB)':<25} | {'Phase Coherence':<16}")
+        print(
+            f"{'Channel Regime':<16} | {'Carrier Amp':<12} | {'Reconstruction SNR (dB)':<25} | {'Phase Coherence':<16}"
+        )
         print("-" * 80)
         for m in metrics:
             if m.carrier_amplitude in [0.01, 0.1]:
-                print(f"{m.regime:<16} | {m.carrier_amplitude:<12.3f} | {m.reconstruction_snr_db:>23.2f}dB | {m.recovered_phase_coherence:>14.4f}")
+                print(
+                    f"{m.regime:<16} | {m.carrier_amplitude:<12.3f} | {m.reconstruction_snr_db:>23.2f}dB | {m.recovered_phase_coherence:>14.4f}"
+                )
         print("-" * 80)
 
     # Downstream Cortical Log-Map transform
     cx, cy = cortical_telemetry.transform_s2_to_cortical(layer.theta, layer.phi)
     act = layer(mx.random.normal(shape=(1, in_dim)))
-    spectrum = cortical_telemetry.compute_planform_spectrum(cx, cy, mx.reshape(layer.weight, (out_dim, in_dim)))
+    spectrum = cortical_telemetry.compute_planform_spectrum(
+        cx, cy, mx.reshape(layer.weight, (out_dim, in_dim))
+    )
     if verbose:
-        print(f"[Cortical Telemetry] Stripes Ratio: {spectrum['stripes_mode_ratio']:.4f}, Lattice Ratio: {spectrum['lattice_mode_ratio']:.4f}")
+        print(
+            f"[Cortical Telemetry] Stripes Ratio: {spectrum['stripes_mode_ratio']:.4f}, Lattice Ratio: {spectrum['lattice_mode_ratio']:.4f}"
+        )
 
     # 7. Verify Independent Replayability Invariant
     if verbose:
-        print("[Stage 7: Replay Verification] Restoring snapshot v1 and verifying deterministic field...")
+        print(
+            "[Stage 7: Replay Verification] Restoring snapshot v1 and verifying deterministic field..."
+        )
 
     saved_density_state = mx.array(accumulator.density)
     # Dirty the state

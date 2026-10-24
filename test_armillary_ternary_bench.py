@@ -1,7 +1,9 @@
 import math
 import time
 import unittest
+
 import mlx.core as mx
+
 from armillary_sphere_tensor import (
     ArmillarySphereTensor,
     quantize_ternary_naive,
@@ -21,7 +23,9 @@ class TestArmillaryTernaryAndMetalBench(unittest.TestCase):
         mx.eval(w, x, y_ref)
 
         q_naive, _, w_naive = quantize_ternary_naive(w)
-        q_opt, _, w_opt = quantize_ternary_optimal_groupwise(w, group_size=64, threshold_factor=0.68)
+        q_opt, _, w_opt = quantize_ternary_optimal_groupwise(
+            w, group_size=64, threshold_factor=0.68
+        )
         mx.eval(w_naive, w_opt)
 
         mse_naive = mx.mean((w - w_naive) ** 2).item()
@@ -48,7 +52,9 @@ class TestArmillaryTernaryAndMetalBench(unittest.TestCase):
 
     def test_apple_silicon_metal_compiled_and_ternary_speedup(self):
         mx.random.seed(7)
-        sphere = ArmillarySphereTensor(in_features=2048, out_features=2048, group_size=64)
+        sphere = ArmillarySphereTensor(
+            in_features=2048, out_features=2048, group_size=64
+        )
         grad = mx.random.normal(shape=(2048, 2048))
         x = mx.random.normal(shape=(16, 2048))
         mx.eval(sphere.weights, sphere.density_field, grad, x)

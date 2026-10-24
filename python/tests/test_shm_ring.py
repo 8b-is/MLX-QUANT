@@ -1,5 +1,6 @@
 import os
 import tempfile
+
 import pytest
 from mlx.quant.shm_ring import SharedMemoryRingBuffer
 
@@ -58,17 +59,26 @@ def test_ring_capacity_and_backpressure():
 
         # Fill ring to capacity
         for i in range(4):
-            assert ring.push(event_type=0, node_id=i, degree=1.0, traversal_count=1.0) is True
+            assert (
+                ring.push(event_type=0, node_id=i, degree=1.0, traversal_count=1.0)
+                is True
+            )
 
         # 5th push must fail (backpressure)
-        assert ring.push(event_type=0, node_id=999, degree=1.0, traversal_count=1.0) is False
+        assert (
+            ring.push(event_type=0, node_id=999, degree=1.0, traversal_count=1.0)
+            is False
+        )
 
         # Pop 2 records to relieve backpressure
         popped = ring.pop_batch(max_records=2)
         assert len(popped) == 2
 
         # Now push should succeed
-        assert ring.push(event_type=0, node_id=1000, degree=1.0, traversal_count=1.0) is True
+        assert (
+            ring.push(event_type=0, node_id=1000, degree=1.0, traversal_count=1.0)
+            is True
+        )
 
         ring.close()
 
