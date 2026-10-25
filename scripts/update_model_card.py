@@ -16,6 +16,7 @@ Result files (all optional; missing ones are reported as "pending"):
     /tmp/sentinel-scan-part1.json   part1 scan (exact counts)
     /tmp/sentinel-scan-flat.json    flat scan (exact counts, checkpointed)
 """
+
 # /// script
 # dependencies = []
 # ///
@@ -63,9 +64,11 @@ def numbers_sig(scans: dict) -> str:
     for name in ("part0", "part1", "flat"):
         if name in scans and scans[name]["total"]:
             t = scans[name]["total"]
-            parts.append(f"{name}:P{t.get('[PHONE]', 0)}"
-                         f"/E{t.get('[EMAIL]', 0)}/I{t.get('[IP]', 0)}"
-                         f"/R{len(scans[name]['per_repo'])}")
+            parts.append(
+                f"{name}:P{t.get('[PHONE]', 0)}"
+                f"/E{t.get('[EMAIL]', 0)}/I{t.get('[IP]', 0)}"
+                f"/R{len(scans[name]['per_repo'])}"
+            )
         elif name in scans:
             parts.append(f"{name}:scanning({scans[name]['done']} files)")
         else:
@@ -83,7 +86,9 @@ def build_audit_section(scans: dict) -> str:
             continue
         t = scans[name]["total"]
         if not t:
-            rows.append(f"| {name} | _scanning ({scans[name]['done']} files done)_ | — | — | — |")
+            rows.append(
+                f"| {name} | _scanning ({scans[name]['done']} files done)_ | — | — | — |"
+            )
             continue
         for s in grand:
             grand[s] += t.get(s, 0)
@@ -104,8 +109,9 @@ def build_audit_section(scans: dict) -> str:
     for name in ("part0", "part1", "flat"):
         if name in scans:
             pr = scans[name]["per_repo"]
-            for f, h in sorted(pr.items(), key=lambda kv: kv[1].get("[PHONE]", 0),
-                               reverse=True)[:5]:
+            for f, h in sorted(
+                pr.items(), key=lambda kv: kv[1].get("[PHONE]", 0), reverse=True
+            )[:5]:
                 top.append(f"  `{f}`: PHONE {h.get('[PHONE]', 0)}")
     top_s = "\n".join(top[:10]) if top else "  _still scanning…_"
 
@@ -160,9 +166,10 @@ def main() -> None:
         return
 
     r = subprocess.run(
-        ["hf", "upload", DATASET, README_OUT, "README.md",
-         "--repo-type", "dataset"],
-        capture_output=True, text=True, timeout=120,
+        ["hf", "upload", DATASET, README_OUT, "README.md", "--repo-type", "dataset"],
+        capture_output=True,
+        text=True,
+        timeout=120,
     )
     if r.returncode != 0:
         print("upload FAILED:", r.stderr[-300:])

@@ -35,8 +35,9 @@ from mlx.nn.layers.bitlinear import BitLinear, activation_quant, weight_quant
 # ---------------------------------------------------------------------------
 
 
-def replace_linear_with_bitlinear(model: nn.Module, binary: bool = False,
-                                  deployed_forward: bool = True):
+def replace_linear_with_bitlinear(
+    model: nn.Module, binary: bool = False, deployed_forward: bool = True
+):
     """Walk the module tree and replace every ``nn.Linear`` with a
     :class:`BitLinear` that copies the pretrained weight as its initial
     full-precision weight.
@@ -112,10 +113,7 @@ def tokenize_fn(tokenizer, texts: list[str], max_len: int = 512):
     # mlx_lm returns a TokenizerWrapper (not a callable transformers tokenizer).
     # It exposes .encode(text) → list[int]; wrap for the batch case.
     if hasattr(tokenizer, "encode"):
-        return [
-            mx.array(tokenizer.encode(x)[:max_len], dtype=mx.uint32)
-            for x in texts
-        ]
+        return [mx.array(tokenizer.encode(x)[:max_len], dtype=mx.uint32) for x in texts]
     enc = tokenizer(
         texts,
         truncation=True,
@@ -287,9 +285,10 @@ def main():
         model, tokenizer = mlx_load(args.model)
         tokenizer.pad_token = tokenizer.eos_token
         from mlx.utils import tree_flatten
+
         tp = model.trainable_parameters()
         leaves = [v for _, v in tree_flatten(tp)]
-        n_params = sum(v.nbytes for v in leaves if hasattr(v, 'nbytes')) / 1e6
+        n_params = sum(v.nbytes for v in leaves if hasattr(v, "nbytes")) / 1e6
         print(f"   loaded {n_params:.1f}M params")
     except ImportError:
         print("   transformers not available; building a tiny test transformer")

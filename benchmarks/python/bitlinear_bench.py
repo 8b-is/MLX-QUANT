@@ -13,8 +13,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
 try:
     from langfuse_callback import langfuse_trace_benchmark
 except ImportError:
+
     def langfuse_trace_benchmark(fn):
         return fn
+
 
 B = 32
 T = 256

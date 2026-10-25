@@ -50,11 +50,9 @@ import mlx.core as mx
 import mlx.nn as nn
 import mlx.optimizers as opt
 import numpy as np
-from mlx.utils import tree_map
-
-from train_quantal import replace_linear_with_bitlinear  # noqa: E402
 from mlx.nn.layers.bitlinear import BitLinear  # noqa: E402
-
+from mlx.utils import tree_map
+from train_quantal import replace_linear_with_bitlinear  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # 1. Data helpers (text field; dynamic per-batch padding, bucketed to *64)
@@ -132,7 +130,9 @@ def make_batch(tokenizer, texts: list[str], max_len: int):
     return inputs, targets, mask
 
 
-def make_batch_faculty(tokenizer, texts: list[str], max_len: int, faculty_indices, top_k: int):
+def make_batch_faculty(
+    tokenizer, texts: list[str], max_len: int, faculty_indices, top_k: int
+):
     """make_batch + per-faculty cache rows aligned to the SAME batch rows.
     Returns (inputs, targets, mask, faculty_batch|None, n_missing) where
     faculty_batch is a list over faculty of (top_ids, top_logits, kl_mask)
@@ -146,7 +146,9 @@ def make_batch_faculty(tokenizer, texts: list[str], max_len: int, faculty_indice
     if faculty_indices is not None:
         faculty_batch = []
         for cache_index in faculty_indices:
-            fb, nm = build_faculty_cache_batch(kept, inputs.shape[1], cache_index, top_k)
+            fb, nm = build_faculty_cache_batch(
+                kept, inputs.shape[1], cache_index, top_k
+            )
             n_missing += nm
             faculty_batch.append(fb)
     return inputs, targets, mask, faculty_batch, n_missing
@@ -204,8 +206,10 @@ def load_faculty(faculty_dirs: list[str], top_k: int, student_vocab: int):
             )
         indices.append(idx)
         manifests.append(man)
-        print(f"   faculty {man.get('teacher', d)}: {len(idx)} cached samples "
-              f"(tokenizer_id={tid})")
+        print(
+            f"   faculty {man.get('teacher', d)}: {len(idx)} cached samples "
+            f"(tokenizer_id={tid})"
+        )
     return indices, manifests
 
 
@@ -275,7 +279,7 @@ def kl_loss_faculty(
     non-empty kl_mask for the batch. Returns a scalar, or None when no faculty
     member has any valid position."""
     present = []
-    for (top_ids, top_logits, kl_mask) in faculty_batch:
+    for top_ids, top_logits, kl_mask in faculty_batch:
         if top_ids is None:
             continue
         if not bool(mx.any(kl_mask)):
@@ -285,7 +289,7 @@ def kl_loss_faculty(
         return None
     kl_sum = None
     kl_count = 0
-    for (top_ids, top_logits, kl_mask) in present:
+    for top_ids, top_logits, kl_mask in present:
         ids = mx.clip(top_ids, 0, student_logits.shape[-1] - 1).astype(mx.int32)
         s_top = mx.take_along_axis(student_logits, ids, axis=-1)  # (B, T, K)
         t_lse = top_logits - mx.logsumexp(top_logits, axis=-1, keepdims=True)
@@ -353,7 +357,9 @@ def stratified_val_split(samples: list[str], tokenizer, val_size: int, seed: int
 # ---------------------------------------------------------------------------
 
 
-def evaluate(model, tokenizer, samples: list[str], max_len: int, batch_size: int = 4) -> float:
+def evaluate(
+    model, tokenizer, samples: list[str], max_len: int, batch_size: int = 4
+) -> float:
     total = 0.0
     n = 0
     for i in range(0, len(samples), batch_size):
@@ -369,7 +375,9 @@ def evaluate(model, tokenizer, samples: list[str], max_len: int, batch_size: int
     return total / max(1, n)
 
 
-def evaluate_faculty(model, tokenizer, samples, max_len, batch_size, faculty_indices, top_k):
+def evaluate_faculty(
+    model, tokenizer, samples, max_len, batch_size, faculty_indices, top_k
+):
     """evaluate + consensus KL against the faculty caches on the same batches.
     Returns (ce, kl) with kl=None when no faculty member has a cache on the
     split."""
@@ -404,14 +412,29 @@ def main():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--model", default="Qwen/Qwen3-1.7B")
     p.add_argument("--data", required=True)
-    p.add_argument("--seminar-data", default=None,
-                   help="optional jsonl of teacher-generated text (merged into masked CE)")
-    p.add_argument("--faculty-dirs", nargs="+", required=True,
-                   help="space-separated list of faculty cache dirs (each has manifest.json)")
-    p.add_argument("--ce-weight", type=float, default=0.5, help="α in loss = α·CE + β·KL")
-    p.add_argument("--faculty-weight", type=float, default=0.5, help="β in loss = α·CE + β·KL")
-    p.add_argument("--beta-ramp-epochs", type=int, default=0,
-                   help="N>0: ramp β linearly from 0 over the first N epochs (CE warmup)")
+    p.add_argument(
+        "--seminar-data",
+        default=None,
+        help="optional jsonl of teacher-generated text (merged into masked CE)",
+    )
+    p.add_argument(
+        "--faculty-dirs",
+        nargs="+",
+        required=True,
+        help="space-separated list of faculty cache dirs (each has manifest.json)",
+    )
+    p.add_argument(
+        "--ce-weight", type=float, default=0.5, help="α in loss = α·CE + β·KL"
+    )
+    p.add_argument(
+        "--faculty-weight", type=float, default=0.5, help="β in loss = α·CE + β·KL"
+    )
+    p.add_argument(
+        "--beta-ramp-epochs",
+        type=int,
+        default=0,
+        help="N>0: ramp β linearly from 0 over the first N epochs (CE warmup)",
+    )
     p.add_argument("--lr-init", type=float, default=3e-4)
     p.add_argument("--lr-end", type=float, default=3e-5)
     p.add_argument("--warmup-frac", type=float, default=0.02)
@@ -422,16 +445,21 @@ def main():
     p.add_argument("--patience", type=int, default=5)
     p.add_argument("--min-delta", type=float, default=0.05)
     p.add_argument("--weight-decay", type=float, default=0.1)
-    p.add_argument("--grad-clip", type=float, default=0.0, help="0 = off (flaky on mlx-cuda)")
+    p.add_argument(
+        "--grad-clip", type=float, default=0.0, help="0 = off (flaky on mlx-cuda)"
+    )
     p.add_argument("--seed", type=int, default=42)
     p.add_argument("--outdir", default="ckpts")
     p.add_argument("--curve", default="curve.jsonl")
     p.add_argument("--resume", default=None, help="safetensors to resume from")
-    p.add_argument("--deployed-forward", action=argparse.BooleanOptionalAction,
-                   default=True,
-                   help="weight-quant-only forward == Rust runner (default). "
-                        "Pass --no-deployed-forward to rebuild the faithful "
-                        "per-projection-RMSNorm BitLinear forward.")
+    p.add_argument(
+        "--deployed-forward",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="weight-quant-only forward == Rust runner (default). "
+        "Pass --no-deployed-forward to rebuild the faithful "
+        "per-projection-RMSNorm BitLinear forward.",
+    )
     p.add_argument("--top-k", type=int, default=64, help="must match the caches")
     args = p.parse_args()
 
@@ -452,13 +480,19 @@ def main():
     print(f"  data:      {args.data}")
     print(f"  seminar:   {args.seminar_data or '-'}")
     print(f"  faculty:   {args.faculty_dirs}")
-    print(f"  weights:   CE {args.ce_weight} / faculty {args.faculty_weight}"
-          f"{f' (ramp {args.beta_ramp_epochs} ep)' if args.beta_ramp_epochs else ''}")
+    print(
+        f"  weights:   CE {args.ce_weight} / faculty {args.faculty_weight}"
+        f"{f' (ramp {args.beta_ramp_epochs} ep)' if args.beta_ramp_epochs else ''}"
+    )
     print(f"  resume:    {args.resume or 'fresh from base'}")
-    print(f"  lr:        {args.lr_init} -> cosine -> {args.lr_end}, warmup {args.warmup_frac}")
+    print(
+        f"  lr:        {args.lr_init} -> cosine -> {args.lr_end}, warmup {args.warmup_frac}"
+    )
     print(f"  batch:     {args.batch_size}  max_len: {args.max_len} (dynamic pad)")
     print(f"  epochs:    {args.epochs} (cap)")
-    print(f"  val_size:  {args.val_size}  patience: {args.patience}  min_delta: {args.min_delta}")
+    print(
+        f"  val_size:  {args.val_size}  patience: {args.patience}  min_delta: {args.min_delta}"
+    )
     print(f"  wd:        {args.weight_decay}  grad_clip: {args.grad_clip}")
     print(f"  metal:     {mx.metal.is_available()}")
 
@@ -478,7 +512,9 @@ def main():
         stud_tok = len(tokenizer.vocab) if hasattr(tokenizer, "vocab") else "unknown"
 
     print("0. loading faculty cache indices...")
-    faculty_indices, faculty_manifests = load_faculty(args.faculty_dirs, args.top_k, stud_tok)
+    faculty_indices, faculty_manifests = load_faculty(
+        args.faculty_dirs, args.top_k, stud_tok
+    )
 
     print("2. swapping Linear -> BitLinear (QAT, deployed forward)...")
     n_before = sum(1 for m in model.modules() if isinstance(m, nn.Linear))
@@ -499,7 +535,9 @@ def main():
         if sem:
             samples = samples + sem
             print(f"   seminar merged: +{len(sem)} samples -> {len(samples)} total")
-    train_samples, val_samples = stratified_val_split(samples, tokenizer, args.val_size, args.seed)
+    train_samples, val_samples = stratified_val_split(
+        samples, tokenizer, args.val_size, args.seed
+    )
     print(f"   {len(samples)} samples")
     print(f"   train {len(train_samples)} / val {len(val_samples)} (stratified)")
 
@@ -507,7 +545,9 @@ def main():
     total_steps = n_batches * args.epochs
     schedule = make_schedule(args.lr_init, args.lr_end, args.warmup_frac, total_steps)
     optimizer = opt.AdamW(learning_rate=schedule, weight_decay=args.weight_decay)
-    print(f"5. optimizer AdamW wd={args.weight_decay}, {n_batches} batches/epoch, {total_steps} total steps")
+    print(
+        f"5. optimizer AdamW wd={args.weight_decay}, {n_batches} batches/epoch, {total_steps} total steps"
+    )
 
     print("6. training...")
     best_val = float("inf")
@@ -523,7 +563,9 @@ def main():
         if args.beta_ramp_epochs > 0:
             ep = min(epoch, args.beta_ramp_epochs)
             beta = args.faculty_weight * (ep / args.beta_ramp_epochs)
-            alpha = args.ce_weight + (args.faculty_weight - beta) * args.ce_weight / max(1e-9, args.faculty_weight)
+            alpha = args.ce_weight + (
+                args.faculty_weight - beta
+            ) * args.ce_weight / max(1e-9, args.faculty_weight)
             alpha = min(1.0, alpha) if args.ce_weight > 0 else 0.0
         else:
             beta = args.faculty_weight
@@ -563,7 +605,9 @@ def main():
             params = model.trainable_parameters()
             loss, grads = mx.value_and_grad(loss_fn)(params)
             if args.grad_clip and args.grad_clip > 0:
-                grads = tree_map(lambda g: mx.clip(g, -args.grad_clip, args.grad_clip), grads)
+                grads = tree_map(
+                    lambda g: mx.clip(g, -args.grad_clip, args.grad_clip), grads
+                )
             optimizer.update(model, grads)
 
             lv = loss.item()
@@ -575,7 +619,10 @@ def main():
                 kl_steps += 1
 
             if global_step % 50 == 0:
-                print(f"   step {global_step}/{total_steps} | loss {lv:.4f} | lr {float(schedule(global_step)):.2e}", flush=True)
+                print(
+                    f"   step {global_step}/{total_steps} | loss {lv:.4f} | lr {float(schedule(global_step)):.2e}",
+                    flush=True,
+                )
 
         avg_loss = epoch_loss / max(1, steps_done)
         avg_kl = epoch_kl / max(1, kl_steps) if kl_steps else None
@@ -583,7 +630,13 @@ def main():
         sps = steps_done / max(1.0, elapsed)
 
         val_loss, val_kl = evaluate_faculty(
-            model, tokenizer, val_samples, args.max_len, args.batch_size, faculty_indices, args.top_k
+            model,
+            tokenizer,
+            val_samples,
+            args.max_len,
+            args.batch_size,
+            faculty_indices,
+            args.top_k,
         )
         lr_now = float(schedule(global_step))
 
@@ -608,10 +661,15 @@ def main():
         kl_s = f" | kl {avg_kl:.4f}" if avg_kl is not None else ""
         kl_v = f" | val_kl {val_kl:.4f}" if val_kl is not None else ""
         miss_s = f" | missing_cache {missing_total}" if missing_total else ""
-        print(f"  epoch {epoch + 1}/{args.epochs} | loss {avg_loss:.4f}{kl_s} | val {val_loss:.4f}{kl_v}{miss_s} | lr {lr_now:.2e} | {elapsed:.1f}s ({sps:.2f} steps/s)", flush=True)
+        print(
+            f"  epoch {epoch + 1}/{args.epochs} | loss {avg_loss:.4f}{kl_s} | val {val_loss:.4f}{kl_v}{miss_s} | lr {lr_now:.2e} | {elapsed:.1f}s ({sps:.2f} steps/s)",
+            flush=True,
+        )
 
         if (epoch + 1) % 5 == 0:
-            pth = os.path.join(args.outdir, f"quantal-long-epoch-{epoch + 1}.safetensors")
+            pth = os.path.join(
+                args.outdir, f"quantal-long-epoch-{epoch + 1}.safetensors"
+            )
             model.save_weights(pth)
             print(f"   [save] weights -> {pth}", flush=True)
         if val_loss < best_val - args.min_delta:
@@ -623,7 +681,10 @@ def main():
             print(f"   * new best val {best_val:.4f}", flush=True)
         else:
             bad_epochs += 1
-            print(f"   val not improved (bad_epochs={bad_epochs}/{args.patience}, best {best_val:.4f})", flush=True)
+            print(
+                f"   val not improved (bad_epochs={bad_epochs}/{args.patience}, best {best_val:.4f})",
+                flush=True,
+            )
             if bad_epochs >= args.patience:
                 print("   early stop", flush=True)
                 break

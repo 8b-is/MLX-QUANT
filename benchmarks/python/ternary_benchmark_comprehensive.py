@@ -5,12 +5,16 @@
 # across M-series unified memory architecture.
 
 import time
+
 import mlx.core as mx
 import mlx.nn as nn
 
+
 def run_benchmark():
     if not mx.metal.is_available():
-        raise SystemExit("Metal GPU not available. This benchmark requires Apple Silicon.")
+        raise SystemExit(
+            "Metal GPU not available. This benchmark requires Apple Silicon."
+        )
 
     print("=" * 80)
     print("✦ MLX-QUANT: Zero-Copy BitNet b1.58 Ternary Metal Kernel Benchmark")
@@ -50,12 +54,20 @@ def run_benchmark():
         # 1. Fused Ternary Metal Kernel
         def run_fused():
             return mx.quantized_matmul(
-                x, w_q, scales, group_size=group_size, bits=bits, mode="ternary", transpose=True
+                x,
+                w_q,
+                scales,
+                group_size=group_size,
+                bits=bits,
+                mode="ternary",
+                transpose=True,
             )
 
         # 2. Compose (Dequantize + Dense Matmul)
         def run_compose():
-            w_dense = mx.dequantize(w_q, scales, group_size=group_size, bits=bits, mode="ternary")
+            w_dense = mx.dequantize(
+                w_q, scales, group_size=group_size, bits=bits, mode="ternary"
+            )
             return x @ w_dense.T
 
         # 3. Dense FP32
@@ -104,8 +116,11 @@ def run_benchmark():
     ternary_mb = ((4096 * 4096 * 2 / 8) + (4096 * 64 * 4)) / (1024 * 1024)
     print(f"  • FP32 Unquantized: {dense_mb:.2f} MB")
     print(f"  • Packed Ternary 1.58-bit (weights + scales): {ternary_mb:.2f} MB")
-    print(f"  • Compression: {dense_mb / ternary_mb:.2f}x ({100 * (1 - ternary_mb/dense_mb):.1f}% VRAM saved)")
+    print(
+        f"  • Compression: {dense_mb / ternary_mb:.2f}x ({100 * (1 - ternary_mb/dense_mb):.1f}% VRAM saved)"
+    )
     print("=" * 80)
+
 
 if __name__ == "__main__":
     run_benchmark()

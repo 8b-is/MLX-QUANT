@@ -91,12 +91,19 @@ ROLE_MAP = {
 
 def snapshot_dir(dataset_id: str) -> Path:
     dirname = "datasets--" + dataset_id.replace("/", "--")
-    snaps = [p for p in glob.glob(os.path.join(CACHE, dirname, "snapshots", "*"))
-             if not os.path.basename(p).startswith("refs")]
+    snaps = [
+        p
+        for p in glob.glob(os.path.join(CACHE, dirname, "snapshots", "*"))
+        if not os.path.basename(p).startswith("refs")
+    ]
     if not snaps:
         raise FileNotFoundError(f"no snapshot for {dataset_id} in {CACHE}")
     snaps = [p for p in snaps if not os.path.basename(p) == "main"]
-    return Path(snaps[0] if snaps else sorted(glob.glob(os.path.join(CACHE, dirname, "snapshots", "*")))[0])
+    return Path(
+        snaps[0]
+        if snaps
+        else sorted(glob.glob(os.path.join(CACHE, dirname, "snapshots", "*")))[0]
+    )
 
 
 def flatten_messages(msgs) -> str:
@@ -134,7 +141,15 @@ def extract_text(obj) -> str | None:
     # 2. chat-list fields (messages / conversation / conversations / dialogue /
     #    dialog / chat) — but NOT `turns` when a canonical text exists (handled
     #    above); `turns` is still a chat list and fine when it is all we have.
-    for key in ("messages", "conversation", "conversations", "dialogue", "dialog", "chat", "turns"):
+    for key in (
+        "messages",
+        "conversation",
+        "conversations",
+        "dialogue",
+        "dialog",
+        "chat",
+        "turns",
+    ):
         v = obj.get(key)
         if isinstance(v, list) and v and isinstance(v[0], dict):
             flat = flatten_messages(v)
@@ -148,15 +163,28 @@ def extract_text(obj) -> str | None:
     # 4. Nemotron-RL `injection` dict (goal + target_tool + context)
     inj = obj.get("injection")
     if isinstance(inj, dict):
-        parts = [str(inj.get(k, "")).strip() for k in
-                 ("goal", "target_tool", "attack_category", "injection_vector", "context")]
+        parts = [
+            str(inj.get(k, "")).strip()
+            for k in (
+                "goal",
+                "target_tool",
+                "attack_category",
+                "injection_vector",
+                "context",
+            )
+        ]
         txt = "\n".join(p for p in parts if p)
         if txt:
             return txt
     # 5. composed instruction + response
     inst = obj.get("instruction") or obj.get("prompt")
     resp = obj.get("response") or obj.get("completion") or obj.get("output")
-    if isinstance(inst, str) and inst.strip() and isinstance(resp, str) and resp.strip():
+    if (
+        isinstance(inst, str)
+        and inst.strip()
+        and isinstance(resp, str)
+        and resp.strip()
+    ):
         return f"Instruction: {inst.strip()}\nResponse: {resp.strip()}"
     # 6. JBB-Behaviors csv: Goal + Behavior
     goal, beh = obj.get("Goal"), obj.get("Behavior")
@@ -225,10 +253,16 @@ def iter_rows(dataset_id: str):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("--out", default="data/train_ultra_qwen3.jsonl",
-                    help="output jsonl path (default: data/train_ultra_qwen3.jsonl)")
-    ap.add_argument("--ultra3", default="data/train_ultra3.jsonl",
-                    help="previous corpus to merge (default: data/train_ultra3.jsonl)")
+    ap.add_argument(
+        "--out",
+        default="data/train_ultra_qwen3.jsonl",
+        help="output jsonl path (default: data/train_ultra_qwen3.jsonl)",
+    )
+    ap.add_argument(
+        "--ultra3",
+        default="data/train_ultra3.jsonl",
+        help="previous corpus to merge (default: data/train_ultra3.jsonl)",
+    )
     ap.add_argument("--seed", type=int, default=42)
     ap.add_argument("--report", default="data/train_ultra_qwen3_corpus.json")
     args = ap.parse_args()
@@ -299,7 +333,10 @@ def main():
         "datasets": stats,
         "datasets_total_taken": total_ds,
         "datasets_skipped": SKIPPED,
-        "dedup": {"unique_after_merge": len(texts), "removed_duplicates": base_n + total_ds - len(texts)},
+        "dedup": {
+            "unique_after_merge": len(texts),
+            "removed_duplicates": base_n + total_ds - len(texts),
+        },
         "final_total": len(texts),
         "out": str(out),
     }

@@ -6,6 +6,7 @@ ASCII progress-bar HUD. No unicode, no emoji, no network.
 
 Usage: uv run --script cogito_hud.py
 """
+
 # /// script
 # dependencies = []
 # ///
@@ -29,8 +30,12 @@ def parse_log(path: str):
     for line in reversed(open(path, errors="ignore").read().splitlines()):
         m = re.search(r"(\d+)/(\d+) done, (\d+) hit, (\d+)s", line)
         if m:
-            return {"done": int(m[1]), "total": int(m[2]),
-                    "hit": int(m[3]), "secs": int(m[4])}
+            return {
+                "done": int(m[1]),
+                "total": int(m[2]),
+                "hit": int(m[3]),
+                "secs": int(m[4]),
+            }
     return None
 
 
@@ -38,11 +43,15 @@ def parse_json(path: str, total_files: int):
     if not os.path.exists(path):
         return None
     d = json.load(open(path))
-    return {"done": total_files, "total": total_files,
-            "hit": len(d.get("per_repo", {})), "secs": 0,
-            "phones": d["total"].get("[PHONE]", 0),
-            "emails": d["total"].get("[EMAIL]", 0),
-            "ips": d["total"].get("[IP]", 0)}
+    return {
+        "done": total_files,
+        "total": total_files,
+        "hit": len(d.get("per_repo", {})),
+        "secs": 0,
+        "phones": d["total"].get("[PHONE]", 0),
+        "emails": d["total"].get("[EMAIL]", 0),
+        "ips": d["total"].get("[IP]", 0),
+    }
 
 
 def bar(frac: float) -> str:
@@ -67,8 +76,10 @@ def row(name: str, d: dict, extra: str = "") -> str:
     el = f"{d['secs']//60:3d}m"
     e = f"eta {eta(d['secs'], d['done'], d['total']):>5}"
     hits = f"hits {d.get('phones', d.get('hit', 0)):>6}"
-    return (f"{name:<6} {bar(frac)} {pct}  {d['done']:>5}/{d['total']:<5} "
-            f"{el} {e} {hits} {extra}")
+    return (
+        f"{name:<6} {bar(frac)} {pct}  {d['done']:>5}/{d['total']:<5} "
+        f"{el} {e} {hits} {extra}"
+    )
 
 
 def main() -> None:
@@ -90,10 +101,18 @@ def main() -> None:
     print("=" * 58)
     print(row("part0", p0))
     print(row("flat ", fl))
-    print(row("part1", p1, f"| P {p1['phones']:,} E {p1['emails']:,} I {p1['ips']:,}" if p1 else ""))
+    print(
+        row(
+            "part1",
+            p1,
+            f"| P {p1['phones']:,} E {p1['emails']:,} I {p1['ips']:,}" if p1 else "",
+        )
+    )
     print("-" * 58)
-    print(f" TOTAL {bar(tot_done/tot_all)} {tot_done/tot_all*100:5.1f}%  "
-          f"{tot_done:,}/{tot_all:,}  PHONE {tot_phones:,}")
+    print(
+        f" TOTAL {bar(tot_done/tot_all)} {tot_done/tot_all*100:5.1f}%  "
+        f"{tot_done:,}/{tot_all:,}  PHONE {tot_phones:,}"
+    )
     print("=" * 58)
 
 

@@ -29,9 +29,8 @@ import json
 import sys
 from pathlib import Path
 
-import numpy as np
 import mlx.core as mx
-
+import numpy as np
 from tokenizers import Tokenizer
 
 # --- Qwen2.5-0.5B architecture (must mirror crates/ternary/src/model.rs) ---
@@ -59,6 +58,7 @@ GATE_PROMPTS = [
 
 
 # ---------------------------------------------------------------- dequant ---
+
 
 def dequant_matrix(codes, scales, n, k):
     """ayeOS: value = (code − 1) · scale, 2-bit LSB-first, row-major over K."""
@@ -93,13 +93,16 @@ def load_norms(capsule):
 
 # ------------------------------------------------------------------ blocks ---
 
+
 def rmsnorm(x, w, eps=RMS_EPS):
     return x * w / mx.sqrt(mx.mean(x * x, axis=-1, keepdims=True) + eps)
 
 
 def rope_freqs():
-    return np.array([1.0 / ROPE_THETA ** (2.0 * i / HEAD_DIM) for i in range(HEAD_DIM // 2)],
-                    dtype=np.float32)
+    return np.array(
+        [1.0 / ROPE_THETA ** (2.0 * i / HEAD_DIM) for i in range(HEAD_DIM // 2)],
+        dtype=np.float32,
+    )
 
 
 FREQS = rope_freqs()
@@ -141,6 +144,7 @@ def attention(q, k, v):
 
 # ------------------------------------------------------------- projections ---
 
+
 def act_quant(x):
     """int8 simulated activation quantization (BitLinear training forward)."""
     scale = 127.0 / mx.clip(mx.abs(x).max(axis=-1, keepdims=True), 1e-5, None)
@@ -159,6 +163,7 @@ def linear(x, w, bitlinear=False, norm_w=None, bias=None):
 
 
 # ----------------------------------------------------------------- forward ---
+
 
 def _norm_w(extras, layer, key):
     """norm weight for a projection when extras are active."""
@@ -180,12 +185,27 @@ def forward(tokens, mats, emb, norms, bitlinear=False, extras=None):
         name = f"model.layers.{layer}"
 
         x = rmsnorm(hidden, mx.array(in_norm))
-        q = linear(x, mats[f"{name}.self_attn.q_proj"], bitlinear,
-                   _norm_w(extras, layer, "q.norm"), _bias(extras, layer, "q.bias"))
-        k = linear(x, mats[f"{name}.self_attn.k_proj"], bitlinear,
-                   _norm_w(extras, layer, "k.norm"), _bias(extras, layer, "k.bias"))
-        v = linear(x, mats[f"{name}.self_attn.v_proj"], bitlinear,
-                   _norm_w(extras, layer, "v.norm"), _bias(extras, layer, "v.bias"))
+        q = linear(
+            x,
+            mats[f"{name}.self_attn.q_proj"],
+            bitlinear,
+            _norm_w(extras, layer, "q.norm"),
+            _bias(extras, layer, "q.bias"),
+        )
+        k = linear(
+            x,
+            mats[f"{name}.self_attn.k_proj"],
+            bitlinear,
+            _norm_w(extras, layer, "k.norm"),
+            _bias(extras, layer, "k.bias"),
+        )
+        v = linear(
+            x,
+            mats[f"{name}.self_attn.v_proj"],
+            bitlinear,
+            _norm_w(extras, layer, "v.norm"),
+            _bias(extras, layer, "v.bias"),
+        )
 
         s = q.shape[0]
         q = q.reshape(s, Q_HEADS, HEAD_DIM)
@@ -195,18 +215,38 @@ def forward(tokens, mats, emb, norms, bitlinear=False, extras=None):
         k = mx.stack([rope_apply(k[i], i) for i in range(s)], axis=0)
 
         attn = attention(q, k, v)
-        o = linear(attn, mats[f"{name}.self_attn.o_proj"], bitlinear,
-                   _norm_w(extras, layer, "o.norm"), None)
+        o = linear(
+            attn,
+            mats[f"{name}.self_attn.o_proj"],
+            bitlinear,
+            _norm_w(extras, layer, "o.norm"),
+            None,
+        )
         hidden = hidden + o
 
         x = rmsnorm(hidden, mx.array(post_norm))
-        up = linear(x, mats[f"{name}.mlp.up_proj"], bitlinear,
-                    _norm_w(extras, layer, "up.norm"), None)
-        gate = linear(x, mats[f"{name}.mlp.gate_proj"], bitlinear,
-                      _norm_w(extras, layer, "gate.norm"), None)
+        up = linear(
+            x,
+            mats[f"{name}.mlp.up_proj"],
+            bitlinear,
+            _norm_w(extras, layer, "up.norm"),
+            None,
+        )
+        gate = linear(
+            x,
+            mats[f"{name}.mlp.gate_proj"],
+            bitlinear,
+            _norm_w(extras, layer, "gate.norm"),
+            None,
+        )
         act = silu(gate) * up
-        down = linear(act, mats[f"{name}.mlp.down_proj"], bitlinear,
-                      _norm_w(extras, layer, "down.norm"), None)
+        down = linear(
+            act,
+            mats[f"{name}.mlp.down_proj"],
+            bitlinear,
+            _norm_w(extras, layer, "down.norm"),
+            None,
+        )
         hidden = hidden + down
 
     hidden = rmsnorm(hidden, mx.array(norms[2 * LAYERS]))
@@ -214,6 +254,7 @@ def forward(tokens, mats, emb, norms, bitlinear=False, extras=None):
 
 
 # ------------------------------------------------------------------- extras ---
+
 
 def _read_bf16_tensor(path, header, key):
     """Read a single BF16 tensor from a safetensors file (header parse).
@@ -246,6 +287,7 @@ def load_bitlinear_extras(checkpoint):
     biases are BF16 (which that backend rejects) so they are read by hand."""
     import json
     import struct
+
     from safetensors import safe_open
 
     path = str(checkpoint)
@@ -258,10 +300,15 @@ def load_bitlinear_extras(checkpoint):
         for layer in range(LAYERS):
             name = f"model.layers.{layer}"
             ex = {}
-            for proj, bias_key in (("q", "self_attn.q_proj"), ("k", "self_attn.k_proj"),
-                                   ("v", "self_attn.v_proj"), ("o", "self_attn.o_proj"),
-                                   ("up", "mlp.up_proj"), ("gate", "mlp.gate_proj"),
-                                   ("down", "mlp.down_proj")):
+            for proj, bias_key in (
+                ("q", "self_attn.q_proj"),
+                ("k", "self_attn.k_proj"),
+                ("v", "self_attn.v_proj"),
+                ("o", "self_attn.o_proj"),
+                ("up", "mlp.up_proj"),
+                ("gate", "mlp.gate_proj"),
+                ("down", "mlp.down_proj"),
+            ):
                 key = f"{name}.{bias_key}.norm.weight"
                 ex[proj + ".norm"] = f.get_slice(key)[:].astype(mx.float32)
                 bkey = f"{name}.{bias_key}.bias"
@@ -273,13 +320,17 @@ def load_bitlinear_extras(checkpoint):
 
 # --------------------------------------------------------------------- main ---
 
+
 def main():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--model-dir", required=True)
     p.add_argument("--checkpoint", default=None)
     p.add_argument("--out", default="quantal_ref_logits.json")
-    p.add_argument("--vanilla-only", action="store_true",
-                   help="skip the bitlinear variant (no checkpoint needed)")
+    p.add_argument(
+        "--vanilla-only",
+        action="store_true",
+        help="skip the bitlinear variant (no checkpoint needed)",
+    )
     args = p.parse_args()
 
     capsule = Path(args.model_dir)
@@ -292,7 +343,11 @@ def main():
 
     extras = None
     if not args.vanilla_only:
-        ckpt = Path(args.checkpoint) if args.checkpoint else capsule / "quantal_model.safetensors"
+        ckpt = (
+            Path(args.checkpoint)
+            if args.checkpoint
+            else capsule / "quantal_model.safetensors"
+        )
         print(f"2. loading BitLinear extras from {ckpt}...")
         extras = load_bitlinear_extras(ckpt)
 

@@ -1,4 +1,5 @@
 import pytest
+
 from examples.vaimshuk_pipeline import run_vaimshuk_pipeline
 
 

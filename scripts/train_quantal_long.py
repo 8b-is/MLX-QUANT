@@ -44,9 +44,8 @@ import numpy as np
 from mlx.utils import tree_map
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from train_quantal import replace_linear_with_bitlinear  # noqa: E402
 from mlx.nn.layers.bitlinear import BitLinear  # noqa: E402
-
+from train_quantal import replace_linear_with_bitlinear  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # 1. Data helpers (text field; dynamic per-batch padding, bucketed to *64)
@@ -167,7 +166,9 @@ def stratified_val_split(samples: list[str], tokenizer, val_size: int, seed: int
 # ---------------------------------------------------------------------------
 
 
-def evaluate(model, tokenizer, samples: list[str], max_len: int, batch_size: int = 4) -> float:
+def evaluate(
+    model, tokenizer, samples: list[str], max_len: int, batch_size: int = 4
+) -> float:
     total = 0.0
     n = 0
     for i in range(0, len(samples), batch_size):
@@ -202,17 +203,22 @@ def main():
     p.add_argument("--patience", type=int, default=5)
     p.add_argument("--min-delta", type=float, default=0.05)
     p.add_argument("--weight-decay", type=float, default=0.1)
-    p.add_argument("--grad-clip", type=float, default=0.0, help="0 = off (flaky on mlx-cuda)")
+    p.add_argument(
+        "--grad-clip", type=float, default=0.0, help="0 = off (flaky on mlx-cuda)"
+    )
     p.add_argument("--seed", type=int, default=42)
     p.add_argument("--outdir", default="ckpts")
     p.add_argument("--curve", default="curve.jsonl")
     p.add_argument("--resume", default=None, help="safetensors to resume from")
-    p.add_argument("--deployed-forward", action=argparse.BooleanOptionalAction,
-                   default=True,
-                   help="weight-quant-only forward == Rust runner (default). "
-                        "Pass --no-deployed-forward to rebuild the faithful "
-                        "per-projection-RMSNorm BitLinear forward for a legacy "
-                        "checkpoint.")
+    p.add_argument(
+        "--deployed-forward",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="weight-quant-only forward == Rust runner (default). "
+        "Pass --no-deployed-forward to rebuild the faithful "
+        "per-projection-RMSNorm BitLinear forward for a legacy "
+        "checkpoint.",
+    )
     args = p.parse_args()
 
     mx.random.seed(args.seed)
@@ -223,10 +229,14 @@ def main():
     print(f"  model:     {args.model}")
     print(f"  data:      {args.data}")
     print(f"  resume:    {args.resume or 'fresh from base'}")
-    print(f"  lr:        {args.lr_init} -> cosine -> {args.lr_end}, warmup {args.warmup_frac}")
+    print(
+        f"  lr:        {args.lr_init} -> cosine -> {args.lr_end}, warmup {args.warmup_frac}"
+    )
     print(f"  batch:     {args.batch_size}  max_len: {args.max_len} (dynamic pad)")
     print(f"  epochs:    {args.epochs} (cap)")
-    print(f"  val_size:  {args.val_size}  patience: {args.patience}  min_delta: {args.min_delta}")
+    print(
+        f"  val_size:  {args.val_size}  patience: {args.patience}  min_delta: {args.min_delta}"
+    )
     print(f"  wd:        {args.weight_decay}  grad_clip: {args.grad_clip}")
     print(f"  metal:     {mx.metal.is_available()}")
 
@@ -255,7 +265,9 @@ def main():
     samples = load_jsonl(args.data)
     if not samples:
         sys.exit("FATAL: no samples loaded")
-    train_samples, val_samples = stratified_val_split(samples, tokenizer, args.val_size, args.seed)
+    train_samples, val_samples = stratified_val_split(
+        samples, tokenizer, args.val_size, args.seed
+    )
     print(f"   {len(samples)} samples")
     print(f"   train {len(train_samples)} / val {len(val_samples)} (stratified)")
 
@@ -263,7 +275,9 @@ def main():
     total_steps = n_batches * args.epochs
     schedule = make_schedule(args.lr_init, args.lr_end, args.warmup_frac, total_steps)
     optimizer = opt.AdamW(learning_rate=schedule, weight_decay=args.weight_decay)
-    print(f"5. optimizer AdamW wd={args.weight_decay}, {n_batches} batches/epoch, {total_steps} total steps")
+    print(
+        f"5. optimizer AdamW wd={args.weight_decay}, {n_batches} batches/epoch, {total_steps} total steps"
+    )
 
     print("6. training...")
     best_val = float("inf")
@@ -283,7 +297,9 @@ def main():
 
         for batch_idx in range(0, len(idxs), args.batch_size):
             batch_idxs = idxs[batch_idx : batch_idx + args.batch_size]
-            batch = make_batch(tokenizer, [train_samples[i] for i in batch_idxs], args.max_len)
+            batch = make_batch(
+                tokenizer, [train_samples[i] for i in batch_idxs], args.max_len
+            )
             if batch is None:
                 continue
             inputs, targets, mask = batch
@@ -291,7 +307,9 @@ def main():
             params = model.trainable_parameters()
             loss, grads = mx.value_and_grad(loss_fn)(params)
             if args.grad_clip and args.grad_clip > 0:
-                grads = tree_map(lambda g: mx.clip(g, -args.grad_clip, args.grad_clip), grads)
+                grads = tree_map(
+                    lambda g: mx.clip(g, -args.grad_clip, args.grad_clip), grads
+                )
             optimizer.update(model, grads)
 
             lv = loss.item()
@@ -300,7 +318,10 @@ def main():
             global_step += 1
 
             if global_step % 50 == 0:
-                print(f"   step {global_step}/{total_steps} | loss {lv:.4f} | lr {float(schedule(global_step)):.2e}", flush=True)
+                print(
+                    f"   step {global_step}/{total_steps} | loss {lv:.4f} | lr {float(schedule(global_step)):.2e}",
+                    flush=True,
+                )
 
         avg_loss = epoch_loss / max(1, steps_done)
         elapsed = time.time() - t0
@@ -309,7 +330,9 @@ def main():
         # Eval with the same batch size as training: the CUDA graph cache is
         # warmed on training shapes, so a smaller eval batch would JIT-build new
         # graph shapes under memory pressure and cublasLtMatmul can fail (code 7).
-        val_loss = evaluate(model, tokenizer, val_samples, args.max_len, batch_size=args.batch_size)
+        val_loss = evaluate(
+            model, tokenizer, val_samples, args.max_len, batch_size=args.batch_size
+        )
         lr_now = float(schedule(global_step))
 
         rec = {
@@ -325,11 +348,16 @@ def main():
         with open(args.curve, "a") as f:
             f.write(json.dumps(rec) + "\n")
 
-        print(f"  epoch {epoch + 1}/{args.epochs} | loss {avg_loss:.4f} | val {val_loss:.4f} | lr {lr_now:.2e} | {elapsed:.1f}s ({sps:.2f} steps/s)", flush=True)
+        print(
+            f"  epoch {epoch + 1}/{args.epochs} | loss {avg_loss:.4f} | val {val_loss:.4f} | lr {lr_now:.2e} | {elapsed:.1f}s ({sps:.2f} steps/s)",
+            flush=True,
+        )
 
         # save every-5 and best
         if (epoch + 1) % 5 == 0:
-            pth = os.path.join(args.outdir, f"quantal-long-epoch-{epoch + 1}.safetensors")
+            pth = os.path.join(
+                args.outdir, f"quantal-long-epoch-{epoch + 1}.safetensors"
+            )
             model.save_weights(pth)
             print(f"   [save] weights -> {pth}", flush=True)
         if val_loss < best_val - args.min_delta:
@@ -341,7 +369,10 @@ def main():
             print(f"   * new best val {best_val:.4f}", flush=True)
         else:
             bad_epochs += 1
-            print(f"   val not improved (bad_epochs={bad_epochs}/{args.patience}, best {best_val:.4f})", flush=True)
+            print(
+                f"   val not improved (bad_epochs={bad_epochs}/{args.patience}, best {best_val:.4f})",
+                flush=True,
+            )
             if bad_epochs >= args.patience:
                 print("   early stop", flush=True)
                 break

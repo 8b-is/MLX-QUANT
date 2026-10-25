@@ -8,6 +8,7 @@ print("[*] Engaging TPU v2-8 Singularity...")
 try:
     import torch_xla
     import torch_xla.core.xla_model as xm
+
     device = xm.xla_device()
     print(f"[+] Attached to XLA Device: {device}")
 except ImportError:
@@ -23,7 +24,9 @@ time.sleep(1)
 
 print("[*] Triggering Gravitational Lensing (Training Phase)...")
 for epoch in range(1, 4):
-    print(f"    -> Expanding Epoch {epoch}/3... [Loss: {max(0.1, 2.5 - (epoch * 0.7)):.4f}]")
+    print(
+        f"    -> Expanding Epoch {epoch}/3... [Loss: {max(0.1, 2.5 - (epoch * 0.7)):.4f}]"
+    )
     time.sleep(1.5)
 
 print("[+] Expansion Fine-Tuning Complete!")

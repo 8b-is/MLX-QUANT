@@ -185,7 +185,9 @@ def main():
     p.add_argument("--out", default="data/teacher_logits/")
     p.add_argument("--max-len", type=int, default=256)
     p.add_argument("--batch-size", type=int, default=8)
-    p.add_argument("--max-samples", type=int, default=10000, help="probe default; 0 = whole corpus")
+    p.add_argument(
+        "--max-samples", type=int, default=10000, help="probe default; 0 = whole corpus"
+    )
     p.add_argument("--top-k", type=int, default=64)
     p.add_argument("--seed", type=int, default=42)
     args = p.parse_args()
@@ -194,7 +196,9 @@ def main():
         os.environ["MLX_CUDA_GRAPH_CACHE_SIZE"] = "2000"
         print("  note: MLX_CUDA_GRAPH_CACHE_SIZE unset — defaulted to 2000")
     else:
-        print(f"  note: MLX_CUDA_GRAPH_CACHE_SIZE={os.environ['MLX_CUDA_GRAPH_CACHE_SIZE']} (respected)")
+        print(
+            f"  note: MLX_CUDA_GRAPH_CACHE_SIZE={os.environ['MLX_CUDA_GRAPH_CACHE_SIZE']} (respected)"
+        )
 
     mx.random.seed(args.seed)
     np.random.seed(args.seed)
@@ -225,11 +229,15 @@ def main():
 
     tokenizer_id = getattr(tokenizer, "vocab_size", None)
     if tokenizer_id is None:
-        tokenizer_id = len(tokenizer.vocab) if hasattr(tokenizer, "vocab") else "unknown"
+        tokenizer_id = (
+            len(tokenizer.vocab) if hasattr(tokenizer, "vocab") else "unknown"
+        )
     print(f"   tokenizer vocab_size={tokenizer_id}")
 
     print("2. loading corpus...")
-    samples = load_jsonl(args.data, max_samples=None if args.max_samples == 0 else args.max_samples)
+    samples = load_jsonl(
+        args.data, max_samples=None if args.max_samples == 0 else args.max_samples
+    )
     if not samples:
         sys.exit("FATAL: no samples loaded")
     print(f"   {len(samples)} samples")
@@ -282,7 +290,9 @@ def main():
     }
     with open(os.path.join(args.out, "manifest.json"), "w") as f:
         json.dump(manifest, f, indent=2)
-    print(f"   manifest -> {os.path.join(args.out, 'manifest.json')} ({n_written} files)")
+    print(
+        f"   manifest -> {os.path.join(args.out, 'manifest.json')} ({n_written} files)"
+    )
     print(f"  done in {time.time() - t0:.0f}s")
     print(f"  TEACHER_LOGITS_DONE {n_written} top_k={args.top_k}")
 

@@ -10,6 +10,7 @@ the 60-file sample).
 
 Usage: uv run --script scan_corpus_sentinels.py [part0|part1|flat|all]
 """
+
 # /// script
 # dependencies = []
 # ///
@@ -51,7 +52,8 @@ def scan_file(path: str) -> dict[str, int]:
     try:
         proc = subprocess.Popen(
             ["curl", "-sL", "--max-time", "120", url],
-            stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
         )
         assert proc.stdout is not None
         for raw in proc.stdout:
@@ -93,11 +95,17 @@ def main() -> None:
                 for s in SENTINELS:
                     total[s] += hits[s]
             if (i + 1) % 250 == 0:
-                print(f"[{label}] {i+1}/{len(files)} scanned, "
-                      f"{len(per_repo)} repos hit, {time.time()-t0:.0f}s", flush=True)
+                print(
+                    f"[{label}] {i+1}/{len(files)} scanned, "
+                    f"{len(per_repo)} repos hit, {time.time()-t0:.0f}s",
+                    flush=True,
+                )
     print("\n=== SCAN RESULT ===", flush=True)
-    print(f"total sentinels: PHONE {total['[PHONE]']} | EMAIL {total['[EMAIL]']} | "
-          f"IP {total['[IP]']}", flush=True)
+    print(
+        f"total sentinels: PHONE {total['[PHONE]']} | EMAIL {total['[EMAIL]']} | "
+        f"IP {total['[IP]']}",
+        flush=True,
+    )
     print(f"repos with hits: {len(per_repo)}", flush=True)
     top = sorted(per_repo.items(), key=lambda kv: kv[1]["[PHONE]"], reverse=True)[:10]
     for name, h in top:
