@@ -1,4 +1,5 @@
 import math
+
 import mlx.core as mx
 import mlx.nn as nn
 import pytest
@@ -10,7 +11,9 @@ def test_armillary_metal_kernel_direct():
     shape = (64, 128)
     weights = mx.ones(shape, dtype=mx.float32)
     # Gradients: half high magnitude, half zero
-    grad = mx.concatenate([mx.ones((32, 128)) * 2.0, mx.zeros((32, 128))], axis=0).astype(mx.float32)
+    grad = mx.concatenate(
+        [mx.ones((32, 128)) * 2.0, mx.zeros((32, 128))], axis=0
+    ).astype(mx.float32)
     density = mx.zeros(shape, dtype=mx.float32)
     phi = mx.ones(shape, dtype=mx.float32) * (math.pi / 2.0)
 
@@ -46,7 +49,9 @@ def test_armillary_sphere_linear_layer():
     out_features = 512
     batch_size = 8
 
-    layer = ArmillarySphereLinear(in_features=in_features, out_features=out_features, base_tau=0.1)
+    layer = ArmillarySphereLinear(
+        in_features=in_features, out_features=out_features, base_tau=0.1
+    )
 
     x = mx.random.normal(shape=(batch_size, in_features))
     y = layer(x)

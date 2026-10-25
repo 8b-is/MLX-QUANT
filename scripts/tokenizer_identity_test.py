@@ -7,6 +7,7 @@ predictive of the old 0.5597 / 2.1469 lines. If no, re-tokenization enters scope
 
 Usage:  python3 tokenizer_identity_test.py [--n 100] [--seed 42]
 """
+
 import argparse
 import json
 import random

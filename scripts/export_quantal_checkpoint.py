@@ -35,8 +35,8 @@ import mlx.nn as nn
 import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from train_quantal import replace_linear_with_bitlinear  # noqa: E402
 from mlx.nn.layers.bitlinear import BitLinear, weight_quant  # noqa: E402
+from train_quantal import replace_linear_with_bitlinear  # noqa: E402
 
 
 def sha256_of(path: str) -> str:
@@ -65,7 +65,7 @@ def ternary_quantize_numpy(w: np.ndarray, group_size: int, threshold: float = 0.
     for r in range(n):
         row = w[r]
         for g in range(k // group_size):
-            group = row[g * group_size:(g + 1) * group_size]
+            group = row[g * group_size : (g + 1) * group_size]
             scale = np.abs(group).mean()
             scales[r, g] = scale
             vals = np.where(np.abs(group) < threshold * scale, 0, np.sign(group))
@@ -104,14 +104,28 @@ def export_capsule(model, group_size, metadata):
 def main():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--checkpoint", required=True, help="trained quantal safetensors")
-    p.add_argument("--out-dir", required=True, help="pocoo demo dir for m*.json + index.json")
-    p.add_argument("--model", default="Qwen/Qwen2.5-0.5B-Instruct", help="base HF model for architecture reconstruction")
+    p.add_argument(
+        "--out-dir", required=True, help="pocoo demo dir for m*.json + index.json"
+    )
+    p.add_argument(
+        "--model",
+        default="Qwen/Qwen2.5-0.5B-Instruct",
+        help="base HF model for architecture reconstruction",
+    )
     p.add_argument("--group-size", type=int, default=64)
     p.add_argument("--epochs", type=int, default=10)
     p.add_argument("--final-loss", type=float, default=None)
     p.add_argument("--val-loss", type=float, default=None)
-    p.add_argument("--base-model", default=None, help="base model recorded in the checkpoint capsule (may differ from --model)")
-    p.add_argument("--source", default="vast.ai remote GPU run", help="where the checkpoint came from")
+    p.add_argument(
+        "--base-model",
+        default=None,
+        help="base model recorded in the checkpoint capsule (may differ from --model)",
+    )
+    p.add_argument(
+        "--source",
+        default="vast.ai remote GPU run",
+        help="where the checkpoint came from",
+    )
     args = p.parse_args()
 
     print(f"  mlx: {mx.__version__}")
@@ -182,7 +196,9 @@ def main():
             "checkpoint_sha256": ckpt_sha,
             "checkpoint_size_bytes": ckpt_size,
             "checkpoint_source": args.source,
-            "export_tool": "MLX-QUANT fork mlx " + mx.__version__ + " (ternary quantize)",
+            "export_tool": "MLX-QUANT fork mlx "
+            + mx.__version__
+            + " (ternary quantize)",
             "export_complete": True,
         },
         "timestamp": now,

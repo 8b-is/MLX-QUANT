@@ -352,7 +352,11 @@ def extract_pair(rec: dict, spec: dict) -> tuple[str, str] | None:
     # 3. Trendyol-style system/user/assistant
     sys_, usr, ast = rec.get("system"), rec.get("user"), rec.get("assistant")
     if isinstance(usr, str) and usr.strip() and isinstance(ast, str) and ast.strip():
-        user = f"System: {sys_.strip()}\n\nUser: {usr.strip()}" if isinstance(sys_, str) and sys_.strip() else usr.strip()
+        user = (
+            f"System: {sys_.strip()}\n\nUser: {usr.strip()}"
+            if isinstance(sys_, str) and sys_.strip()
+            else usr.strip()
+        )
         return (user, ast.strip())
 
     # 4. paired instruction/prompt + output/answer/response
@@ -362,7 +366,11 @@ def extract_pair(rec: dict, spec: dict) -> tuple[str, str] | None:
             continue
         user = uv.strip()
         # WNT3D: append `input` payload to the instruction
-        if uk == "instruction" and isinstance(rec.get("input"), str) and rec["input"].strip():
+        if (
+            uk == "instruction"
+            and isinstance(rec.get("input"), str)
+            and rec["input"].strip()
+        ):
             user = f"{user}\n{rec['input'].strip()}"
         for fk in FREE_FIELDS:
             fv = rec.get(fk)
@@ -376,7 +384,9 @@ def extract_pair(rec: dict, spec: dict) -> tuple[str, str] | None:
         return (user, "")
 
     # 5. generic fallback: first string column -> user, rest joined -> free
-    strings = [(k, str(v).strip()) for k, v in rec.items() if isinstance(v, str) and v.strip()]
+    strings = [
+        (k, str(v).strip()) for k, v in rec.items() if isinstance(v, str) and v.strip()
+    ]
     if strings:
         user = strings[0][1]
         free = "\n".join(s for _, s in strings[1:])
@@ -406,7 +416,9 @@ def stream_records(dataset_id: str, cache_dir: str, config, split):
         # trust_remote_code was removed in newer datasets versions; older ones
         # need it for custom loader scripts. Try with, fall back without.
         try:
-            return load_dataset(dataset_id, split=split or "train", trust_remote_code=True, **kw)
+            return load_dataset(
+                dataset_id, split=split or "train", trust_remote_code=True, **kw
+            )
         except TypeError:
             return load_dataset(dataset_id, split=split or "train", **kw)
 
@@ -437,52 +449,84 @@ def upload_file(hf_bin: str, src: Path, bucket_uri: str) -> None:
 
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("--staging", default="/tmp/corpus-v3-staging",
-                    help="staging dir for per-dataset jsonl (default: /tmp/corpus-v3-staging)")
-    ap.add_argument("--bucket", default="PeetPedro/quantal-corpus-v3",
-                    help="destination bucket (default: PeetPedro/quantal-corpus-v3)")
-    ap.add_argument("--bucket-prefix", default="data",
-                    help="prefix inside the bucket (default: data)")
-    ap.add_argument("--max-per-dataset", type=int, default=None,
-                    help="safety override: cap every dataset at min(cap, N)")
+    ap.add_argument(
+        "--staging",
+        default="/tmp/corpus-v3-staging",
+        help="staging dir for per-dataset jsonl (default: /tmp/corpus-v3-staging)",
+    )
+    ap.add_argument(
+        "--bucket",
+        default="PeetPedro/quantal-corpus-v3",
+        help="destination bucket (default: PeetPedro/quantal-corpus-v3)",
+    )
+    ap.add_argument(
+        "--bucket-prefix",
+        default="data",
+        help="prefix inside the bucket (default: data)",
+    )
+    ap.add_argument(
+        "--max-per-dataset",
+        type=int,
+        default=None,
+        help="safety override: cap every dataset at min(cap, N)",
+    )
     ap.add_argument("--seed", type=int, default=42)
-    ap.add_argument("--cache-dir", default="/tmp/hf-datasets-cache",
-                    help="ephemeral datasets/hub cache dir (default: /tmp/hf-datasets-cache)")
-    ap.add_argument("--no-upload", action="store_true",
-                    help="stage locally but do NOT upload to the bucket")
-    ap.add_argument("--stream-chunk", type=int, default=500,
-                    help="samples buffered before flushing a dataset jsonl")
+    ap.add_argument(
+        "--cache-dir",
+        default="/tmp/hf-datasets-cache",
+        help="ephemeral datasets/hub cache dir (default: /tmp/hf-datasets-cache)",
+    )
+    ap.add_argument(
+        "--no-upload",
+        action="store_true",
+        help="stage locally but do NOT upload to the bucket",
+    )
+    ap.add_argument(
+        "--stream-chunk",
+        type=int,
+        default=500,
+        help="samples buffered before flushing a dataset jsonl",
+    )
     args = ap.parse_args()
 
     if os.environ.get("HF_HUB_DISABLE_XET") != "1":
         os.environ["HF_HUB_DISABLE_XET"] = "1"
-        print(f"[{_ts()}] note: HF_HUB_DISABLE_XET=1 (xet chunk caches off)", flush=True)
+        print(
+            f"[{_ts()}] note: HF_HUB_DISABLE_XET=1 (xet chunk caches off)", flush=True
+        )
 
     try:
         import datasets  # noqa: F401  (deferred so --help works without it)
     except ImportError:
-        print("FATAL: the `datasets` library is required (streaming load). "
-              "Run with:  uv run --with datasets --with pyarrow python scripts/build_corpus_v3.py",
-              file=sys.stderr)
+        print(
+            "FATAL: the `datasets` library is required (streaming load). "
+            "Run with:  uv run --with datasets --with pyarrow python scripts/build_corpus_v3.py",
+            file=sys.stderr,
+        )
         return 1
 
     hf_bin = shutil.which("hf")
     if hf_bin is None:
-        print("WARNING: `hf` CLI not found on PATH — upload will be skipped "
-              "(run pip install -U 'hf-hub' and log in with `hf auth login`)",
-              file=sys.stderr)
+        print(
+            "WARNING: `hf` CLI not found on PATH — upload will be skipped "
+            "(run pip install -U 'hf-hub' and log in with `hf auth login`)",
+            file=sys.stderr,
+        )
         args.no_upload = True
     if hf_bin is None and not args.no_upload:
         args.no_upload = True
     if not args.no_upload:
         assert hf_bin is not None
         # sanity: verify bucket access BEFORE burning time on the build
-        proc = subprocess.run([hf_bin, "buckets", "list", args.bucket],
-                              capture_output=True, text=True)
+        proc = subprocess.run(
+            [hf_bin, "buckets", "list", args.bucket], capture_output=True, text=True
+        )
         if proc.returncode != 0:
-            print(f"WARNING: cannot list bucket {args.bucket}: "
-                  f"{proc.stderr.strip() or proc.stdout.strip()} — uploading will be skipped",
-                  file=sys.stderr)
+            print(
+                f"WARNING: cannot list bucket {args.bucket}: "
+                f"{proc.stderr.strip() or proc.stdout.strip()} — uploading will be skipped",
+                file=sys.stderr,
+            )
             args.no_upload = True
 
     staging = Path(args.staging)
@@ -498,8 +542,10 @@ def main() -> int:
     raw_extracted = 0
     dedup_skipped_total = 0
 
-    print(f"[{_ts()}] v3 corpus build start — {len(DATASETS)} datasets, seed={args.seed}",
-          flush=True)
+    print(
+        f"[{_ts()}] v3 corpus build start — {len(DATASETS)} datasets, seed={args.seed}",
+        flush=True,
+    )
 
     for i, (ds_id, spec) in enumerate(DATASETS.items(), 1):
         cap = spec["cap"]
@@ -514,7 +560,7 @@ def main() -> int:
         errors: list[str] = []
         t0 = datetime.now()
 
-        for (cfg, split) in streams:
+        for cfg, split in streams:
             if n_taken >= cap:
                 break
             try:
@@ -535,17 +581,26 @@ def main() -> int:
                         continue
                     seen_hashes.add(h)
                     seen_ids.add(uid)
-                    taken.append({"id": uid, "user_message": user, "free_response": free})
+                    taken.append(
+                        {"id": uid, "user_message": user, "free_response": free}
+                    )
                     n_taken += 1
                     n_tokens += est_tokens(user, free)
             except Exception as e:  # one bad stream must not kill the dataset
-                errors.append(f"stream {cfg or '<default>'}/{split or '<default>'}: {type(e).__name__}: {e}")
-                print(f"  [{_ts()}] {ds_id} [{cfg or '<default>'}/{split or '<default>'}] "
-                      f"ERROR {type(e).__name__}: {e}", flush=True)
+                errors.append(
+                    f"stream {cfg or '<default>'}/{split or '<default>'}: {type(e).__name__}: {e}"
+                )
+                print(
+                    f"  [{_ts()}] {ds_id} [{cfg or '<default>'}/{split or '<default>'}] "
+                    f"ERROR {type(e).__name__}: {e}",
+                    flush=True,
+                )
 
         if n_taken < cap and errors and not taken:
-            print(f"  [{_ts()}] {ds_id}: FAILED — {len(errors)} stream error(s), 0 samples",
-                  flush=True)
+            print(
+                f"  [{_ts()}] {ds_id}: FAILED — {len(errors)} stream error(s), 0 samples",
+                flush=True,
+            )
 
         # deterministic per-dataset shuffle (seed)
         rng.shuffle(taken)
@@ -601,21 +656,30 @@ def main() -> int:
         json.dump(report, fh, indent=2)
 
     total_bytes = sum(p.stat().st_size for p in staging.iterdir() if p.is_file())
-    print(f"\n[{_ts()}] datasets OK: {report['datasets_ok']}/{len(DATASETS)}", flush=True)
-    print(f"[{_ts()}] total samples: {total_taken} (raw extracted {raw_extracted}, "
-          f"dedup skipped {dedup_skipped_total})", flush=True)
+    print(
+        f"\n[{_ts()}] datasets OK: {report['datasets_ok']}/{len(DATASETS)}", flush=True
+    )
+    print(
+        f"[{_ts()}] total samples: {total_taken} (raw extracted {raw_extracted}, "
+        f"dedup skipped {dedup_skipped_total})",
+        flush=True,
+    )
     print(f"[{_ts()}] total est tokens: {total_tokens}", flush=True)
     print(f"[{_ts()}] staging: {staging} ({round(total_bytes / 1e6, 2)}MB)", flush=True)
 
     # -- upload
     if args.no_upload:
-        print(f"[{_ts()}] UPLOAD SKIPPED (--no-upload). Staged files ready in {staging}.",
-              flush=True)
+        print(
+            f"[{_ts()}] UPLOAD SKIPPED (--no-upload). Staged files ready in {staging}.",
+            flush=True,
+        )
         return 0
 
     dest_prefix = f"hf://buckets/{args.bucket}/{args.bucket_prefix}"
-    print(f"\n[{_ts()}] uploading {len(list(staging.iterdir()))} files -> {dest_prefix}/",
-          flush=True)
+    print(
+        f"\n[{_ts()}] uploading {len(list(staging.iterdir()))} files -> {dest_prefix}/",
+        flush=True,
+    )
     assert hf_bin is not None  # guaranteed: upload only runs when the CLI exists
     upload_failures = 0
     for fpath in sorted(staging.iterdir()):
@@ -627,11 +691,17 @@ def main() -> int:
             upload_failures += 1
             print(f"  [{_ts()}] upload FAILED for {fpath.name}: {e}", flush=True)
     if upload_failures:
-        print(f"[{_ts()}] WARNING: {upload_failures} file(s) failed to upload — "
-              f"retry with `hf buckets sync {staging} {dest_prefix}`", flush=True)
+        print(
+            f"[{_ts()}] WARNING: {upload_failures} file(s) failed to upload — "
+            f"retry with `hf buckets sync {staging} {dest_prefix}`",
+            flush=True,
+        )
         return 2
-    print(f"[{_ts()}] CORPUS_V3_DONE n={total_taken} datasets={report['datasets_ok']} "
-          f"bucket={args.bucket}/{args.bucket_prefix}", flush=True)
+    print(
+        f"[{_ts()}] CORPUS_V3_DONE n={total_taken} datasets={report['datasets_ok']} "
+        f"bucket={args.bucket}/{args.bucket_prefix}",
+        flush=True,
+    )
     return 0
 
 

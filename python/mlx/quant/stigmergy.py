@@ -5,6 +5,7 @@ import json
 import time
 from dataclasses import asdict, dataclass
 from typing import Any, Dict, List, Optional, Tuple, Union
+
 import mlx.core as mx
 
 
@@ -14,6 +15,7 @@ class StigmergySnapshot:
     Immutable versioned snapshot of the gravitational density field rho.
     Supports independent replay, rollback, and ablation testing.
     """
+
     version: int
     timestamp: float
     shape: Tuple[int, ...]
@@ -34,7 +36,7 @@ class StigmergicAccumulator:
     """
     Normalized, saturating, time-smoothed transformation for swarm evidence:
         rho <- (1 - lambda) * rho + lambda * tanh(alpha * degree + beta * traversal)
-    
+
     Prevents runaway positive feedback loops while giving the Armillary Sphere
     a calibrated gravitational inertia field.
     """
@@ -105,12 +107,14 @@ class StigmergicAccumulator:
             self.density[indices] = mx.clip(updated_vals, self.rho_min, self.rho_max)
 
         if record_log:
-            self.event_log.append({
-                "step": self.event_count,
-                "timestamp": time.time(),
-                "has_indices": indices is not None,
-                "mean_density": float(mx.mean(self.density).item()),
-            })
+            self.event_log.append(
+                {
+                    "step": self.event_count,
+                    "timestamp": time.time(),
+                    "has_indices": indices is not None,
+                    "mean_density": float(mx.mean(self.density).item()),
+                }
+            )
 
         return self.density
 
@@ -141,7 +145,9 @@ class StigmergicAccumulator:
     def restore_snapshot(self, snapshot: StigmergySnapshot):
         """Restores density field to a previous snapshot state."""
         if snapshot.shape != self.shape:
-            raise ValueError(f"Snapshot shape {snapshot.shape} does not match {self.shape}")
+            raise ValueError(
+                f"Snapshot shape {snapshot.shape} does not match {self.shape}"
+            )
         if snapshot.data is None:
             raise ValueError("Snapshot contains no tensor data")
         self.density = mx.array(snapshot.data)

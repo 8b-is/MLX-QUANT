@@ -1,7 +1,12 @@
 import math
+
 import mlx.core as mx
 import pytest
-from mlx.quant.probes import CorticalLogMapTelemetry, HolographicDestructiveProbe, compute_snr_db
+from mlx.quant.probes import (
+    CorticalLogMapTelemetry,
+    HolographicDestructiveProbe,
+    compute_snr_db,
+)
 
 
 def test_destructive_quantization_channel():

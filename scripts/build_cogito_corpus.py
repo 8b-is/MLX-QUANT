@@ -13,6 +13,7 @@ Conventions (workspace):
   - hf CLI is logged in as PeetPedro (shell HF_TOKEN env may be invalid).
   - resumable: repos already in the bucket (or a local done-file) are skipped.
 """
+
 from __future__ import annotations
 
 import json
@@ -28,35 +29,102 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
 BUCKET = "PeetPedro/cogitoergosumma-corpus"
-DATASET_REPO = "PeetPedro/cogitoergosumma-corpus"  # HF dataset repo (load_dataset-compatible)
+DATASET_REPO = (
+    "PeetPedro/cogitoergosumma-corpus"  # HF dataset repo (load_dataset-compatible)
+)
 OWNER = "standardgalactic"
 STAGING = Path("/tmp/cogito-staging")
 DONE_FILE = Path("/tmp/cogito-done.json")
-MAX_WORKERS = 2      # extractor workers: clone + extract -> queue
-UPLOAD_WORKERS = 2   # parallel uploaders (4 was too aggressive → HF rate-limit pileup)
+MAX_WORKERS = 2  # extractor workers: clone + extract -> queue
+UPLOAD_WORKERS = 2  # parallel uploaders (4 was too aggressive → HF rate-limit pileup)
 upload_queue: "queue.Queue" = queue.Queue()  # Path objects of finished JSONLs
 MAX_CLONE_MB = 300  # skip giant forks (chromium 21GB, coronavirus 37GB, ...):
-                    # they're duplicate codebases, not original text, and would
-                    # fill the M1 disk. Only small/medium forks are worth text.`
+# they're duplicate codebases, not original text, and would
+# fill the M1 disk. Only small/medium forks are worth text.`
 
 TEXT_EXTS = {
-    ".txt", ".md", ".markdown", ".tex", ".org", ".rst", ".srt", ".vtt",
-    ".tsv", ".json", ".py", ".sh", ".c", ".cpp", ".h", ".rs", ".go",
-    ".java", ".js", ".ts", ".html", ".htm", ".yaml", ".yml", ".toml",
-    ".csv", ".sql", ".rb", ".php", ".lua", ".r", ".jl",
+    ".txt",
+    ".md",
+    ".markdown",
+    ".tex",
+    ".org",
+    ".rst",
+    ".srt",
+    ".vtt",
+    ".tsv",
+    ".json",
+    ".py",
+    ".sh",
+    ".c",
+    ".cpp",
+    ".h",
+    ".rs",
+    ".go",
+    ".java",
+    ".js",
+    ".ts",
+    ".html",
+    ".htm",
+    ".yaml",
+    ".yml",
+    ".toml",
+    ".csv",
+    ".sql",
+    ".rb",
+    ".php",
+    ".lua",
+    ".r",
+    ".jl",
 }
 SKIP_REPOS = {  # binary-heavy or non-unique content
-    "fonts", "playfloor", "30-seconds-of-code", "tornado", "example",
-    "dotfiles", "vimrc", "nvim", "config", "dot-config",
+    "fonts",
+    "playfloor",
+    "30-seconds-of-code",
+    "tornado",
+    "example",
+    "dotfiles",
+    "vimrc",
+    "nvim",
+    "config",
+    "dot-config",
     # known LFS-monsters: the GitHub API says ~157MB but the clone is 8.7GB
     # (binary/LFS payload) — they deadlock the disk guard. Skip by name.
-    "AEC-Challenge", "covid-19-repo-data", "chromium", "coronavirus_structural_task_force",
+    "AEC-Challenge",
+    "covid-19-repo-data",
+    "chromium",
+    "coronavirus_structural_task_force",
 }
 SKIP_BIN_EXT = {
-    ".pdf", ".mhtml", ".mp3", ".wav", ".flac", ".png", ".jpg", ".jpeg",
-    ".gif", ".webp", ".zip", ".tar", ".gz", ".bz2", ".7z", ".rar",
-    ".woff", ".ttf", ".otf", ".eot", ".ico", ".mp4", ".mov", ".avi",
-    ".pkl", ".npy", ".npz", ".h5", ".parquet", ".ipynb",
+    ".pdf",
+    ".mhtml",
+    ".mp3",
+    ".wav",
+    ".flac",
+    ".png",
+    ".jpg",
+    ".jpeg",
+    ".gif",
+    ".webp",
+    ".zip",
+    ".tar",
+    ".gz",
+    ".bz2",
+    ".7z",
+    ".rar",
+    ".woff",
+    ".ttf",
+    ".otf",
+    ".eot",
+    ".ico",
+    ".mp4",
+    ".mov",
+    ".avi",
+    ".pkl",
+    ".npy",
+    ".npz",
+    ".h5",
+    ".parquet",
+    ".ipynb",
 }
 # ── per-repo gate state (populated via --old-counts CLI arg) ───────────────────
 GATE_OLD_COUNTS: dict[str, int] = {}
@@ -67,7 +135,9 @@ GATE_HELD_LIST: list[dict] = []
 def gh_api(url: str) -> list:
     out = subprocess.run(
         ["gh", "api", url, "--paginate"],
-        capture_output=True, text=True, timeout=60,
+        capture_output=True,
+        text=True,
+        timeout=60,
     )
     if out.returncode != 0:
         print(f"  [gh api error] {out.stderr[:200]}", flush=True)
@@ -98,7 +168,9 @@ def load_repos() -> list[dict]:
         if p.exists():
             with open(p) as f:
                 repos = json.load(f)
-            print(f"[repos] loaded {len(repos)} repos from {p} ({src_name})", flush=True)
+            print(
+                f"[repos] loaded {len(repos)} repos from {p} ({src_name})", flush=True
+            )
             break
     else:
         url = f"users/{OWNER}/repos?per_page=100&sort=updated"
@@ -116,7 +188,9 @@ def load_repos() -> list[dict]:
             continue
         keep.append(r)
     keep.sort(key=lambda r: -r.get("size", 0))
-    print(f"[repos] {len(keep)} text-relevant repos (of {len(repos)} fetched)", flush=True)
+    print(
+        f"[repos] {len(keep)} text-relevant repos (of {len(repos)} fetched)", flush=True
+    )
     return keep
 
 
@@ -153,8 +227,13 @@ def is_text(path: Path) -> bool:
 # commit timestamp (v0.0.0-YYYYMMDDHHMMSS-<sha>) is NOT a phone. Secret
 # shapes stay active everywhere — a token in a lockfile is still a token.
 _LOCKFILES = {
-    "go.sum", "go.mod", "package-lock.json", "Cargo.lock", "yarn.lock",
-    "poetry.lock", "requirements.txt",
+    "go.sum",
+    "go.mod",
+    "package-lock.json",
+    "Cargo.lock",
+    "yarn.lock",
+    "poetry.lock",
+    "requirements.txt",
 }
 _SECRET_PATTERNS = [
     # well-known API key / token shapes (highest confidence, low false-positive)
@@ -165,9 +244,18 @@ _SECRET_PATTERNS = [
     (re.compile(r"\bhf_[A-Za-z0-9]{10,}\b"), "HF-TOKEN"),
     (re.compile(r"\bxox[baprs]-[A-Za-z0-9-]{10,}\b"), "SLACK-TOKEN"),
     (re.compile(r"\bBearer [A-Za-z0-9._~+/-]{20,}\b", re.I), "BEARER-TOKEN"),
-    (re.compile(r"\b(?:ssh|git)://[A-Za-z0-9._%+-]+:[^@\s/]+@", re.I), "URL-CREDENTIAL"),
+    (
+        re.compile(r"\b(?:ssh|git)://[A-Za-z0-9._%+-]+:[^@\s/]+@", re.I),
+        "URL-CREDENTIAL",
+    ),
     # PEM private keys (any type)
-    (re.compile(r"-----BEGIN (?:[A-Z ]+ )?PRIVATE KEY-----.*?-----END (?:[A-Z ]+ )?PRIVATE KEY-----", re.S), "PRIVATE-KEY"),
+    (
+        re.compile(
+            r"-----BEGIN (?:[A-Z ]+ )?PRIVATE KEY-----.*?-----END (?:[A-Z ]+ )?PRIVATE KEY-----",
+            re.S,
+        ),
+        "PRIVATE-KEY",
+    ),
     # crypto wallet addresses (EVM-style)
     (re.compile(r"\b0x[a-fA-F0-9]{40}\b"), "WALLET-ADDRESS"),
     # PII
@@ -177,7 +265,12 @@ _SECRET_PATTERNS = [
     # 20191001225624 is a UTC commit timestamp (Go pseudo-version), not a
     # phone — the adjacency refusal kills the pseudo-version case alone.
     # Note: no trailing \b — "(415) 555-2671" has a ")" at the boundary.
-    (re.compile(r"(?:\+[0-9]{1,3}[ .-]?)?(?:\([0-9]{2,4}\)|[0-9]{2,4})[ .-][0-9]{3,4}[ .-]?[0-9]{3,4}(?![0-9])"), "PHONE"),
+    (
+        re.compile(
+            r"(?:\+[0-9]{1,3}[ .-]?)?(?:\([0-9]{2,4}\)|[0-9]{2,4})[ .-][0-9]{3,4}[ .-]?[0-9]{3,4}(?![0-9])"
+        ),
+        "PHONE",
+    ),
     (re.compile(r"\b(?:[0-9]{1,3}\.){3}[0-9]{1,3}\b"), "IP"),
 ]
 # long hex / base64 runs — a match touching one is a hash, not a phone
@@ -188,7 +281,7 @@ def _phone_adjacent_to_hash(text: str, m: re.Match) -> bool:
     """Refuse a PHONE match whose neighborhood contains a hex/base64 run —
     Go pseudo-versions (v0.0.0-<ts>-<sha> h1:...) die on this condition."""
     start, end = m.start(), m.end()
-    return bool(_HEX_B64_RUN.search(text[max(0, start - 8): end + 8]))
+    return bool(_HEX_B64_RUN.search(text[max(0, start - 8) : end + 8]))
 
 
 def scrub_text(text: str, rel: str = "") -> str:
@@ -201,7 +294,10 @@ def scrub_text(text: str, rel: str = "") -> str:
         if is_lockfile and label in ("PHONE", "IP"):
             continue
         if label == "PHONE":
-            text = pat.sub(lambda m: m.group(0) if _phone_adjacent_to_hash(text, m) else "[PHONE]", text)
+            text = pat.sub(
+                lambda m: m.group(0) if _phone_adjacent_to_hash(text, m) else "[PHONE]",
+                text,
+            )
         else:
             text = pat.sub(f"[{label}]", text)
     return text
@@ -274,8 +370,11 @@ def process_repo(repo: dict, worker: int, done: set[str]) -> dict | None:
         return {"name": name, "status": "skip-done"}
     size_mb = repo.get("size", 0) / 1024
     if size_mb > MAX_CLONE_MB:
-        print(f"[w{worker}]   ∎ {name}: {size_mb:.0f} MB > {MAX_CLONE_MB} MB cap — skipped "
-              f"(giant fork, not original text, M1 disk sacred)", flush=True)
+        print(
+            f"[w{worker}]   ∎ {name}: {size_mb:.0f} MB > {MAX_CLONE_MB} MB cap — skipped "
+            f"(giant fork, not original text, M1 disk sacred)",
+            flush=True,
+        )
         return {"name": name, "status": "skip-too-big"}
     clone_dir = STAGING / f"w{worker}" / name
     out_jsonl = STAGING / f"w{worker}" / f"{name}.jsonl"
@@ -289,13 +388,25 @@ def process_repo(repo: dict, worker: int, done: set[str]) -> dict | None:
     # workers never overflow the M1 disk (the machine can't sustain 15GB free
     # during cloning — user picked 8GB as the balance).
     while disk_free_gb() < 8.0:
-        print(f"[w{worker}]   … {name}: waiting for disk ({disk_free_gb():.1f}GB free, need 8)", flush=True)
+        print(
+            f"[w{worker}]   … {name}: waiting for disk ({disk_free_gb():.1f}GB free, need 8)",
+            flush=True,
+        )
         time.sleep(15)
     try:
         r = subprocess.run(
-            ["git", "clone", "--depth", "1", "-q",
-             f"https://github.com/{OWNER}/{name}.git", str(clone_dir)],
-            capture_output=True, text=True, timeout=600,
+            [
+                "git",
+                "clone",
+                "--depth",
+                "1",
+                "-q",
+                f"https://github.com/{OWNER}/{name}.git",
+                str(clone_dir),
+            ],
+            capture_output=True,
+            text=True,
+            timeout=600,
         )
         if r.returncode != 0:
             # cleanup the partial clone immediately — this is what caused 19GB
@@ -332,32 +443,58 @@ def process_repo(repo: dict, worker: int, done: set[str]) -> dict | None:
                 # column numeric) are likely safe to leave; ambiguous files need
                 # a human. The gate decides; the classifier only triages.
                 struct = file_is_structural(raw)
-                GATE_HELD_LIST.append({
-                    "repo": name,
-                    "old_phone": old_phone,
-                    "new_phone": new_phone,
-                    "classification": "structural-data" if struct else "ambiguous",
-                    "reason": ("new scrubber adds more PHONE sentinels than old removed"
-                               + (" (file is structural data — likely safe to leave)" if struct else " (needs manual review)")),
-                })
-                print(f"[w{worker}] ↻ {name}: gate held — old {old_phone} → new {new_phone} "
-                      f"(new > old, re-emit blocked)", flush=True)
+                GATE_HELD_LIST.append(
+                    {
+                        "repo": name,
+                        "old_phone": old_phone,
+                        "new_phone": new_phone,
+                        "classification": "structural-data" if struct else "ambiguous",
+                        "reason": (
+                            "new scrubber adds more PHONE sentinels than old removed"
+                            + (
+                                " (file is structural data — likely safe to leave)"
+                                if struct
+                                else " (needs manual review)"
+                            )
+                        ),
+                    }
+                )
+                print(
+                    f"[w{worker}] ↻ {name}: gate held — old {old_phone} → new {new_phone} "
+                    f"(new > old, re-emit blocked)",
+                    flush=True,
+                )
                 # remove clone and return gate-held result; uploader will skip
                 subprocess.run(["rm", "-rf", str(clone_dir)], capture_output=True)
                 if rows == 0:
                     out_jsonl.unlink(missing_ok=True)
-                    print(f"[w{worker}]   ∅ {name}: no text content (gate-held)", flush=True)
+                    print(
+                        f"[w{worker}]   ∅ {name}: no text content (gate-held)",
+                        flush=True,
+                    )
                     return {"name": name, "status": "no-text", "gate_held": True}
                 # still queue the JSONL but mark it gate-held; uploader will check gate
                 upload_queue.put(out_jsonl)
-                print(f"[w{worker}]   → {name}: {rows} rows, {chars/1e6:.1f} MB text queued for upload "
-                      f"(queue depth {upload_queue.qsize()}) [GATE-HELD]", flush=True)
-                return {"name": name, "status": "extracted", "rows": rows, "chars": chars,
-                        "gate_held": True, "old_phone": old_phone, "new_phone": new_phone}
+                print(
+                    f"[w{worker}]   → {name}: {rows} rows, {chars/1e6:.1f} MB text queued for upload "
+                    f"(queue depth {upload_queue.qsize()}) [GATE-HELD]",
+                    flush=True,
+                )
+                return {
+                    "name": name,
+                    "status": "extracted",
+                    "rows": rows,
+                    "chars": chars,
+                    "gate_held": True,
+                    "old_phone": old_phone,
+                    "new_phone": new_phone,
+                }
             files += 1
             chars += len(text)
             rows += 1
-            f.write(json.dumps({"id": f"{name}/{rel}", "text": text, "source": name}) + "\n")
+            f.write(
+                json.dumps({"id": f"{name}/{rel}", "text": text, "source": name}) + "\n"
+            )
 
     # cleanup clone immediately (M1 disk sacred)
     subprocess.run(["rm", "-rf", str(clone_dir)], capture_output=True)
@@ -371,8 +508,11 @@ def process_repo(repo: dict, worker: int, done: set[str]) -> dict | None:
     # in their own parallel pool, so this worker immediately starts the next
     # clone instead of blocking on a (possibly slow) single-threaded upload.
     upload_queue.put(out_jsonl)
-    print(f"[w{worker}]   → {name}: {rows} rows, {chars/1e6:.1f} MB text queued for upload "
-          f"(queue depth {upload_queue.qsize()})", flush=True)
+    print(
+        f"[w{worker}]   → {name}: {rows} rows, {chars/1e6:.1f} MB text queued for upload "
+        f"(queue depth {upload_queue.qsize()})",
+        flush=True,
+    )
     return {"name": name, "status": "extracted", "rows": rows, "chars": chars}
 
 
@@ -398,12 +538,16 @@ def hf_part_usage() -> dict[str, int]:
     usage: dict[str, int] = {}
     for idx in range(0, 60):  # up to part59
         name = f"part{idx}"
-        url = (f"https://huggingface.co/api/datasets/{DATASET_REPO}"
-               f"/tree/main/data/{name}?limit=1000")
+        url = (
+            f"https://huggingface.co/api/datasets/{DATASET_REPO}"
+            f"/tree/main/data/{name}?limit=1000"
+        )
         try:
             out = subprocess.run(
                 ["curl", "-s", "--max-time", "10", url],
-                capture_output=True, text=True, timeout=15,
+                capture_output=True,
+                text=True,
+                timeout=15,
             )
             entries = json.loads(out.stdout)
         except Exception:  # noqa: BLE001
@@ -427,7 +571,9 @@ def pick_shard(usage: dict[str, int]) -> str:
     return f"part{max(int(k[4:]) for k in usage) + 1}"
 
 
-def upload_worker(worker: int, done: set[str], results: list, stop: threading.Event) -> None:
+def upload_worker(
+    worker: int, done: set[str], results: list, stop: threading.Event
+) -> None:
     last_sync = 0.0
     sync_dir = STAGING.parent / "cogito-sync"
     # probe HF once at startup: which part dirs exist and how full are they?
@@ -437,15 +583,22 @@ def upload_worker(worker: int, done: set[str], results: list, stop: threading.Ev
     usage = hf_part_usage()
     base_part = pick_shard(usage)
     part_count = usage.get(base_part, 0)
-    print(f"[u{worker}]   part state: {usage or '(no part dirs yet)'} → "
-          f"starting at {base_part} ({part_count} files there)", flush=True)
+    print(
+        f"[u{worker}]   part state: {usage or '(no part dirs yet)'} → "
+        f"starting at {base_part} ({part_count} files there)",
+        flush=True,
+    )
     while True:
         # final drain when told to stop: run one last sync cycle (no sleep,
         # no min-interval) to push everything left in staging, then exit
         draining = stop.is_set()
         if draining:
             pass  # fall through to the sync attempt below
-        if draining and not list(STAGING.glob("w0/*.jsonl")) and not list(STAGING.glob("w1/*.jsonl")):
+        if (
+            draining
+            and not list(STAGING.glob("w0/*.jsonl"))
+            and not list(STAGING.glob("w1/*.jsonl"))
+        ):
             break
         if not draining:
             # wait for a batch to accumulate, then sync the whole staging dir
@@ -516,17 +669,33 @@ def upload_worker(worker: int, done: set[str], results: list, stop: threading.Ev
                 continue
         if not linked:
             continue
-        print(f"[u{worker}]   ⤒ syncing {n} files ({total_mb:.1f} MB) → {DATASET_REPO}:data/{base_part}+ (batched)", flush=True)
+        print(
+            f"[u{worker}]   ⤒ syncing {n} files ({total_mb:.1f} MB) → {DATASET_REPO}:data/{base_part}+ (batched)",
+            flush=True,
+        )
         try:
             up = subprocess.run(
-                ["hf", "upload", DATASET_REPO, str(sync_dir), "data", "--repo-type", "dataset"],
-                capture_output=True, text=True, timeout=1200,
+                [
+                    "hf",
+                    "upload",
+                    DATASET_REPO,
+                    str(sync_dir),
+                    "data",
+                    "--repo-type",
+                    "dataset",
+                ],
+                capture_output=True,
+                text=True,
+                timeout=1200,
             )
         except subprocess.TimeoutExpired:
             print(f"[u{worker}]   ↻ sync timeout — will retry next cycle", flush=True)
             continue
         if up.returncode != 0:
-            print(f"[u{worker}]   ↻ sync failed: {up.stderr[:200]} — retry next cycle", flush=True)
+            print(
+                f"[u{worker}]   ↻ sync failed: {up.stderr[:200]} — retry next cycle",
+                flush=True,
+            )
             time.sleep(60)  # HF rate-limit backoff between sync attempts
             continue
         # success: mark every staged file as done and remove it
@@ -549,8 +718,13 @@ def upload_worker(worker: int, done: set[str], results: list, stop: threading.Ev
             except OSError:
                 pass
         save_done(done)
-        results.append({"name": f"batch-{int(last_sync)}", "status": "ok", "mb": total_mb, "n": n})
-        print(f"[u{worker}]   ✓ synced {n} files ({total_mb:.1f} MB) → data/{base_part}", flush=True)
+        results.append(
+            {"name": f"batch-{int(last_sync)}", "status": "ok", "mb": total_mb, "n": n}
+        )
+        print(
+            f"[u{worker}]   ✓ synced {n} files ({total_mb:.1f} MB) → data/{base_part}",
+            flush=True,
+        )
 
 
 def main() -> None:
@@ -559,13 +733,18 @@ def main() -> None:
     repos = load_repos()
     # skip already-uploaded (done-file) repos
     pending = [r for r in repos if r["name"] not in done]
-    print(f"[main] {len(pending)} repos to process across {MAX_WORKERS} workers", flush=True)
+    print(
+        f"[main] {len(pending)} repos to process across {MAX_WORKERS} workers",
+        flush=True,
+    )
 
     results = []  # extractor results
     upload_results = []  # uploader results
     stop = threading.Event()
     # one batched sync-uploader: drains the whole staging dir per HF commit
-    uploader_fut = ThreadPoolExecutor(max_workers=1).submit(upload_worker, 0, done, upload_results, stop)
+    uploader_fut = ThreadPoolExecutor(max_workers=1).submit(
+        upload_worker, 0, done, upload_results, stop
+    )
     with ThreadPoolExecutor(max_workers=MAX_WORKERS) as ex:
         futures = {
             ex.submit(process_repo, r, i % MAX_WORKERS, done): r["name"]
@@ -587,11 +766,16 @@ def main() -> None:
     extracted = [r for r in results if r and r["status"] == "extracted"]
     ok_up = [r for r in upload_results if r and r["status"] == "ok"]
     fail_up = [r for r in upload_results if r and r["status"] != "ok"]
-    print(f"\n[main] extracted: {len(extracted)} | uploaded OK: {len(ok_up)} | "
-          f"upload failed: {len(fail_up)} | failed/skipped: {len(results)-len(extracted)}",
-          flush=True)
-    print(f"[main] dataset: {DATASET_REPO} (public, load_dataset-ready) | "
-          f"bucket archive: hf://buckets/{BUCKET}", flush=True)
+    print(
+        f"\n[main] extracted: {len(extracted)} | uploaded OK: {len(ok_up)} | "
+        f"upload failed: {len(fail_up)} | failed/skipped: {len(results)-len(extracted)}",
+        flush=True,
+    )
+    print(
+        f"[main] dataset: {DATASET_REPO} (public, load_dataset-ready) | "
+        f"bucket archive: hf://buckets/{BUCKET}",
+        flush=True,
+    )
 
 
 if __name__ == "__main__":

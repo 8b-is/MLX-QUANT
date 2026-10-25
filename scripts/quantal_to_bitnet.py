@@ -46,6 +46,7 @@ VOCAB = 151936
 
 # ------------------------------------------------------------- ayeOS loading ---
 
+
 def dequant_matrix(codes, scales, n, k):
     """ayeOS: value = (code − 1) · scale, 2-bit LSB-first, row-major over K."""
     c = np.asarray(codes, dtype=np.uint32).reshape(n, k // 16)
@@ -66,7 +67,9 @@ def load_capsule(model_dir):
     mats = {}
     for entry in index["matrices"]:
         raw = json.load(open(capsule / entry["file"]))
-        key = raw["name"] if raw["name"].endswith(".weight") else raw["name"] + ".weight"
+        key = (
+            raw["name"] if raw["name"].endswith(".weight") else raw["name"] + ".weight"
+        )
         mats[key] = dequant_matrix(
             raw["codes"], raw["scales"], raw["dim"], raw["in_features"]
         )
@@ -78,6 +81,7 @@ def load_capsule(model_dir):
 
 # -------------------------------------------------------- state_dict builder ---
 
+
 def build_state_dict(mats, emb, norms):
     """Map the ayeOS matrices to BitNetForCausalLM state_dict keys."""
     sd = {}
@@ -87,8 +91,12 @@ def build_state_dict(mats, emb, norms):
     for layer in range(LAYERS):
         in_norm = norms[2 * layer]
         post_norm = norms[2 * layer + 1]
-        sd[f"model.layers.{layer}.input_layernorm.weight"] = torch.from_numpy(in_norm.copy())
-        sd[f"model.layers.{layer}.post_attention_layernorm.weight"] = torch.from_numpy(post_norm.copy())
+        sd[f"model.layers.{layer}.input_layernorm.weight"] = torch.from_numpy(
+            in_norm.copy()
+        )
+        sd[f"model.layers.{layer}.post_attention_layernorm.weight"] = torch.from_numpy(
+            post_norm.copy()
+        )
         for proj in ("q_proj", "k_proj", "v_proj", "o_proj"):
             key = f"model.layers.{layer}.self_attn.{proj}.weight"
             sd[key] = torch.from_numpy(mats[key].copy())
@@ -125,11 +133,18 @@ def build_config():
 
 # --------------------------------------------------------------- parity gate ---
 
+
 def main():
     p = argparse.ArgumentParser(description=__doc__)
-    p.add_argument("--model-dir", required=True, help="ayeOS capsule (index.json + m*.json + sidecars)")
+    p.add_argument(
+        "--model-dir",
+        required=True,
+        help="ayeOS capsule (index.json + m*.json + sidecars)",
+    )
     p.add_argument("--ref", default=None, help="golden ref.json for the parity gate")
-    p.add_argument("--out", default=None, help="write config.json + pytorch_model.bin to this dir")
+    p.add_argument(
+        "--out", default=None, help="write config.json + pytorch_model.bin to this dir"
+    )
     args = p.parse_args()
 
     print("1. loading ayeOS capsule...")
@@ -177,8 +192,10 @@ def main():
             gate = bool(d.max() <= 1e-2 or rel.max() <= 1e-2)
             same = bool(out.argmax() == gold.argmax())
             ok_all &= gate
-            print(f"  prompt {i + 1}: max_abs={d.max():.3e} max_rel={rel.max():.3e} "
-                  f"argmax {out.argmax()} vs {gold.argmax()} same={same} → {'PASS' if gate else 'FAIL'}")
+            print(
+                f"  prompt {i + 1}: max_abs={d.max():.3e} max_rel={rel.max():.3e} "
+                f"argmax {out.argmax()} vs {gold.argmax()} same={same} → {'PASS' if gate else 'FAIL'}"
+            )
         print("RESULT:", "PASS" if ok_all else "FAIL")
         return 0 if ok_all else 1
 
