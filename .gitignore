@@ -83,3 +83,6 @@ uv.lock
 # Rust build output
 mlx-quant-linux/target/
 **/target/
+
+# CI benchmark artifact (published as a workflow artifact, not tracked)
+benchmark_results.json

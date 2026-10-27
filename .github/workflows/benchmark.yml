@@ -8,14 +8,17 @@ on:
       - 'benchmark_results.json'
   schedule:
     - cron: '0 0 * * *' # Run daily
+  workflow_dispatch:
+
+concurrency:
+  group: benchmark-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
   run-benchmarks:
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
 
       - name: Install uv
         run: curl -LsSf https://astral.sh/uv/install.sh | sh
@@ -24,11 +27,10 @@ jobs:
         run: |
           export PATH="$HOME/.cargo/bin:$PATH"
           uv run scripts/mlx_bench_matrix_yall.py --format json > benchmark_results.json
-          
-      - name: Commit Results to Repository
-        run: |
-          git config --global user.name 'github-actions[bot]'
-          git config --global user.email 'github-actions[bot]@users.noreply.github.com'
-          git add benchmark_results.json
-          git commit -m "chore: Update benchmark_results.json via CI" || echo "No changes to commit"
-          git push origin main
+
+      - name: Upload Results
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmark-results-${{ github.run_id }}
+          path: benchmark_results.json
+          retention-days: 90
