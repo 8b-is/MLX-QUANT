@@ -36,6 +36,7 @@ jobs:
           # Trusted Publisher via OIDC: `HF_OIDC_RESOURCE` asks the hub to
           # exchange this workflow's GitHub OIDC token for a short-lived HF
           # token scoped to the bucket — no long-lived HF_TOKEN needed.
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           HF_OIDC_RESOURCE: "bucket:PeetPedro/cogitoergosumma-corpus"
           HF_TOKEN: ""
 
