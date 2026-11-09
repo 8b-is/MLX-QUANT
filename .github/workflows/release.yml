@@ -33,7 +33,7 @@ jobs:
     if: github.repository == 'ml-explore/mlx'
     runs-on: ubuntu-22.04
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v4
       - uses: ./.github/actions/build-docs
 
   deploy_documentation:
@@ -75,7 +75,7 @@ jobs:
       PYPI_RELEASE: 1
       DEV_RELEASE: ${{ inputs.dev-release && 1 || 0 }}
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v4
       - uses: ./.github/actions/setup
         id: setup
         with:
@@ -117,7 +117,7 @@ jobs:
       }}
     env: *build-env
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v4
       - uses: ./.github/actions/setup
         id: setup
         with:
@@ -142,7 +142,7 @@ jobs:
     runs-on: 'macos-26'
     env: *build-env
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v4
       - uses: ./.github/actions/setup
         id: setup
         with:
@@ -216,7 +216,7 @@ jobs:
                     'ubuntu-22.04'))
       }}
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v4
       - uses: ./.github/actions/setup
         with:
           toolkit: ${{ matrix.toolkit }}
