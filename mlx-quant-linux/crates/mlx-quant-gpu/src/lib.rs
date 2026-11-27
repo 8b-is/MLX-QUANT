@@ -5,9 +5,11 @@
 //! - [`metal`]: Safe Apple Silicon Metal GPU runtime bridge (`MetalRuntime`).
 //! - Embedded compute shader sources for Metal, WebGPU (WGSL), and CUDA.
 
+pub mod cuda;
 pub mod metal;
 pub mod pm4;
 
+pub use cuda::CudaRuntime;
 pub use metal::{GpuError, MetalRuntime};
 pub use pm4::*;
 
@@ -127,6 +129,33 @@ mod tests {
         assert!(WGSL_TERNARY_BEEHIVE.contains("bitcos_gemv_i8"));
         assert!(CUDA_TERNARY_BEEHIVE.contains("ternary_2bit_gemv_i8"));
         assert!(CUDA_TERNARY_BEEHIVE.contains("bitcos_gemv_i8"));
+        assert!(CUDA_TERNARY_BEEHIVE.contains("tequila_deadzone_ste_q16"));
+        assert!(CUDA_TERNARY_BEEHIVE.contains("mhc_sinkhorn_4x4_q16"));
+        assert!(CUDA_TERNARY_BEEHIVE.contains("engram_ngram_gather_q16"));
+    }
+
+    #[test]
+    fn cuda_runtime_reports_unsupported_without_nvcc_or_runs_live_parity() {
+        #[cfg(not(has_cuda_bridge))]
+        {
+            assert_eq!(CudaRuntime::new().unwrap_err(), GpuError::UnsupportedPlatform);
+        }
+        #[cfg(has_cuda_bridge)]
+        {
+            if let Ok(rt) = CudaRuntime::new() {
+                let mut w = [0u8; 4];
+                w.copy_from_slice(&[0xAA, 0x00, 0x55, 0xAA]);
+                let x = [1i8; 16];
+                let mut y_gpu = [0i32; 1];
+                let mut y_ref = [0i32; 1];
+                let ns = rt
+                    .ternary_2bit_gemv(&w, &x, &mut y_gpu, 1, 16)
+                    .expect("cuda ternary_2bit_gemv");
+                mlx_quant_core::ternary::ternary_2bit_gemv_scalar(&w, &x, &mut y_ref, 1, 16);
+                assert_eq!(y_gpu, y_ref);
+                assert!(ns < 5_000_000_000);
+            }
+        }
     }
 
     #[cfg(has_metal_bridge)]

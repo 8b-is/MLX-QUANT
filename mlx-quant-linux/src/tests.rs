@@ -631,4 +631,38 @@ fn cosmology_modules_and_pm4_ring_behavior() {
     assert_eq!(ramanujan_bipartite_edges(4, 8, 4, 1, &mut edges), 16);
     let route = mushroom_body_wta_route::<2>(&[Q16_ONE, Q16_ONE >> 1], None, 0);
     assert_eq!(route.weights_q16[..2].iter().sum::<i32>(), Q16_ONE);
+
+    // Offline A6000 telemetry parser check (zero float)
+    let sample = r#"{
+      "node_ip": "49.13.101.247",
+      "gpu": {
+        "name": "NVIDIA RTX 6000 Ada Generation",
+        "vcpu_count": 48,
+        "vram_used_mib": 19062,
+        "vram_total_mib": 49140,
+        "vram_free_mib": 30078,
+        "vram_ratio_pq": "353/910",
+        "gpu_util_pct": 0,
+        "temp_celsius": 30,
+        "power_milliwatts": 20160,
+        "load_trit": 1
+      },
+      "healthy_service_ratio_pq": "3/4",
+      "subsystem_f_improver": {
+        "total_cycles": 47129,
+        "mean_speedup_pq": "3758/2269"
+      },
+      "vlan_160tb": {
+        "raid160_free_gib": 102312,
+        "git160_free_gib": 14325,
+        "total_synced_github_repos": 367
+      }
+    }"#;
+    let snap = crate::a6000_telemetry::parse_a6000_status_json(sample).expect("a6000 json");
+    assert_eq!(snap.gpu_name, "NVIDIA RTX 6000 Ada Generation");
+    assert_eq!(snap.vram_free_mib, 30078);
+    assert_eq!(snap.vram_ratio, Ratio::new(353, 910));
+    assert_eq!(snap.improver_speedup, Ratio::new(3758, 2269));
+    assert_eq!(snap.healthy_services, Ratio::new(3, 4));
+    assert_eq!(snap.total_synced_github_repos, 367);
 }

@@ -1,5 +1,6 @@
-//! Safe Apple Metal GPU dispatch doorbell wrapping `mlx_quant_gpu::MetalRuntime`
-//! with a validated portable CPU ring simulator fallback when Metal is unavailable.
+//! Safe GPU dispatch doorbell wrapping `mlx_quant_gpu::MetalRuntime` (macOS) and
+//! `mlx_quant_gpu::CudaRuntime` (Linux/NVIDIA CUDA, e.g. RTX 6000 Ada) with a validated
+//! portable CPU ring simulator fallback when no native GPU runtime is present.
 
 use crate::ExecutionMode;
 use crate::pulsar::Pulsar;
@@ -7,17 +8,18 @@ use crate::tensor::{DType, Tensor};
 use core::sync::atomic::{AtomicU32, AtomicU64, Ordering, fence};
 use mlx_quant_core::beehive::{TequilaConfig, tequila_ste_step_q16};
 use mlx_quant_core::ternary::{bitcos_gemv_scalar, ternary_2bit_gemv_scalar};
-use mlx_quant_gpu::{GpuError, MetalRuntime};
+use mlx_quant_gpu::{CudaRuntime, GpuError, MetalRuntime};
 
 /// Hardware reference base MMIO address for Apple Silicon AGX (informational descriptor only).
 pub const AGX_MMIO_BASE: usize = 0x2_8000_0000;
 /// Hardware reference doorbell offset within AGX MMIO space (informational descriptor only).
 pub const AGX_DOORBELL_OFFSET: usize = 0x4000;
 
-/// Safe GPU submission doorbell with live Apple Metal GPU support and portable simulator fallback.
+/// Safe GPU submission doorbell with live Apple Metal / NVIDIA CUDA support and CPU simulator fallback.
 #[derive(Debug)]
 pub struct AgxDoorbell {
     metal: Option<MetalRuntime>,
+    cuda: Option<CudaRuntime>,
     ring_counter: AtomicU64,
     last_gpu_ns: AtomicU64,
     last_ring_id: AtomicU32,
@@ -31,12 +33,18 @@ impl Default for AgxDoorbell {
 }
 
 impl AgxDoorbell {
-    /// Initialize `AgxDoorbell`, attaching live `MetalRuntime` when running on Metal-capable macOS,
-    /// or cleanly falling back to `"Portable Ring Simulator"` otherwise.
+    /// Initialize `AgxDoorbell`, attaching live `MetalRuntime` on macOS or live `CudaRuntime`
+    /// on Linux+CUDA hosts, cleanly falling back to `"Portable Ring Simulator"` otherwise.
     pub fn new() -> Self {
         let metal = MetalRuntime::new().ok();
+        let cuda = if metal.is_none() {
+            CudaRuntime::new().ok()
+        } else {
+            None
+        };
         Self {
             metal,
+            cuda,
             ring_counter: AtomicU64::new(0),
             last_gpu_ns: AtomicU64::new(0),
             last_ring_id: AtomicU32::new(0),
@@ -47,17 +55,21 @@ impl AgxDoorbell {
     pub fn new_simulator() -> Self {
         Self {
             metal: None,
+            cuda: None,
             ring_counter: AtomicU64::new(0),
             last_gpu_ns: AtomicU64::new(0),
             last_ring_id: AtomicU32::new(0),
         }
     }
 
-    /// Honest backend mode string: `"Apple Metal Live GPU"` vs `"Portable Ring Simulator"`.
+    /// Honest backend mode string: `"Apple Metal Live GPU"`, `"NVIDIA CUDA Live GPU"`,
+    /// or `"Portable Ring Simulator"`.
     #[inline]
     pub fn backend_mode(&self) -> &'static str {
         if self.metal.is_some() {
             "Apple Metal Live GPU"
+        } else if self.cuda.is_some() {
+            "NVIDIA CUDA Live GPU"
         } else {
             "Portable Ring Simulator"
         }
@@ -66,26 +78,29 @@ impl AgxDoorbell {
     /// Execution mode classification for audit reporting.
     #[inline]
     pub fn execution_mode(&self) -> ExecutionMode {
-        if self.metal.is_some() {
+        if self.is_live_gpu() {
             ExecutionMode::Measured
         } else {
             ExecutionMode::DesignedDescriptor
         }
     }
 
-    /// Active Metal GPU device name, or `"Portable Ring Simulator"` when running on CPU fallback.
+    /// Active GPU device name, or `"Portable Ring Simulator"` when running on CPU fallback.
     #[inline]
     pub fn device_name(&self) -> &str {
-        match &self.metal {
-            Some(rt) => rt.device_name(),
-            None => "Portable Ring Simulator",
+        if let Some(rt) = &self.metal {
+            rt.device_name()
+        } else if let Some(rt) = &self.cuda {
+            rt.device_name()
+        } else {
+            "Portable Ring Simulator"
         }
     }
 
-    /// Returns `true` when backed by a live Apple Metal GPU runtime.
+    /// Returns `true` when backed by a live Apple Metal or NVIDIA CUDA GPU runtime.
     #[inline]
     pub fn is_live_gpu(&self) -> bool {
-        self.metal.is_some()
+        self.metal.is_some() || self.cuda.is_some()
     }
 
     /// Monotonic count of doorbell rings and GPU/simulator kernel submissions.
@@ -125,6 +140,8 @@ impl AgxDoorbell {
     ) -> Result<u64, GpuError> {
         let ns = if let Some(rt) = &self.metal {
             rt.ternary_2bit_gemv(w_packed, x, y_out, rows, cols)?
+        } else if let Some(rt) = &self.cuda {
+            rt.ternary_2bit_gemv(w_packed, x, y_out, rows, cols)?
         } else {
             let _ = u32::try_from(rows).map_err(|_| GpuError::DimensionOverflow)?;
             let _ = u32::try_from(cols).map_err(|_| GpuError::DimensionOverflow)?;
@@ -158,6 +175,16 @@ impl AgxDoorbell {
         cols: usize,
     ) -> Result<u64, GpuError> {
         let ns = if let Some(rt) = &self.metal {
+            rt.bitcos_gemv(
+                presence,
+                signs,
+                row_sign_byte_offsets,
+                x,
+                y_out,
+                rows,
+                cols,
+            )?
+        } else if let Some(rt) = &self.cuda {
             rt.bitcos_gemv(
                 presence,
                 signs,
@@ -229,6 +256,8 @@ impl AgxDoorbell {
         cfg: TequilaConfig,
     ) -> Result<u64, GpuError> {
         let ns = if let Some(rt) = &self.metal {
+            rt.tequila_ste_with_config(weights_q16, grads_q16, cfg)?
+        } else if let Some(rt) = &self.cuda {
             rt.tequila_ste_with_config(weights_q16, grads_q16, cfg)?
         } else {
             if weights_q16.len() != grads_q16.len() {

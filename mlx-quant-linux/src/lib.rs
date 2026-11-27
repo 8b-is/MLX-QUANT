@@ -9,6 +9,7 @@ pub use mlx_quant_asm;
 pub use mlx_quant_core;
 pub use mlx_quant_gpu;
 
+pub mod a6000_telemetry;
 pub mod agx_doorbell;
 pub mod allocator;
 pub mod amd_mi300x;

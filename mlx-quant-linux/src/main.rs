@@ -6,6 +6,9 @@
 //! - `--bench`: benchmarks `1024x1024` and `4096x1024` ternary 2-bit GEMV (Scalar vs NEON ASM vs Metal GPU)
 //! - `--json`: emits structured JSON output (zero external crates, zero floating-point math)
 
+use mlx_quant_linux::a6000_telemetry::{
+    A6000StatusSnapshot, fetch_a6000_status, resolve_a6000_status_url,
+};
 use mlx_quant_linux::agx_doorbell::AgxDoorbell;
 use mlx_quant_linux::allocator::BumpAllocator;
 use mlx_quant_linux::amd_mi300x::AmdComputeRing;
@@ -53,6 +56,7 @@ use std::process::ExitCode;
 struct CliFlags {
     verify_all: bool,
     bench: bool,
+    a6000_status: bool,
     json: bool,
     help: bool,
 }
@@ -906,6 +910,7 @@ fn print_human(
     summary: &PipelineSummary,
     verifies: &[VerifyItem],
     benches: &[BenchRow],
+    a6000: &Option<Result<A6000StatusSnapshot, String>>,
     audits: &[AuditRow],
 ) {
     println!("=== MLX-QUANT v3.0.0-alpha.1 (Ultra-OmniLLL Bare-Metal Substrate) ===");
@@ -994,6 +999,39 @@ fn print_human(
                     kgbs
                 );
             }
+        }
+    }
+
+    if let Some(a6000_res) = a6000 {
+        println!();
+        println!("[A6000 Sovereign Workstation Telemetry ({})]", resolve_a6000_status_url());
+        match a6000_res {
+            Ok(snap) => {
+                println!(
+                    "  node={} gpu=\"{}\" vcpus={} vram={}/{} MiB (free={} MiB, ratio={})",
+                    snap.node_ip,
+                    snap.gpu_name,
+                    snap.vcpu_count,
+                    snap.vram_used_mib,
+                    snap.vram_total_mib,
+                    snap.vram_free_mib,
+                    snap.vram_ratio
+                );
+                println!(
+                    "  util={}% temp={}C power={}mW trit={} improver_cycles={} speedup={} services={} raid160_free={}GiB git160_free={}GiB repos={}",
+                    snap.gpu_util_pct,
+                    snap.temp_celsius,
+                    snap.power_milliwatts,
+                    snap.load_trit.as_i8(),
+                    snap.improver_cycles,
+                    snap.improver_speedup,
+                    snap.healthy_services,
+                    snap.raid160_free_gib,
+                    snap.git160_free_gib,
+                    snap.total_synced_github_repos
+                );
+            }
+            Err(err) => println!("  status=unavailable ({err})"),
         }
     }
 
@@ -1095,6 +1133,7 @@ fn main() -> ExitCode {
     let mut flags = CliFlags {
         verify_all: false,
         bench: false,
+        a6000_status: false,
         json: false,
         help: false,
     };
@@ -1103,11 +1142,14 @@ fn main() -> ExitCode {
         match arg.as_str() {
             "--verify-all" => flags.verify_all = true,
             "--bench" => flags.bench = true,
+            "--a6000-status" => flags.a6000_status = true,
             "--json" => flags.json = true,
             "-h" | "--help" => flags.help = true,
             other => {
                 eprintln!("unknown argument: {other}");
-                eprintln!("usage: mlx-quant-linux [--verify-all] [--bench] [--json]");
+                eprintln!(
+                    "usage: mlx-quant-linux [--verify-all] [--bench] [--a6000-status] [--json]"
+                );
                 return ExitCode::from(2);
             }
         }
@@ -1115,7 +1157,7 @@ fn main() -> ExitCode {
 
     if flags.help {
         println!("mlx-quant-linux v3.0.0-alpha.1");
-        println!("usage: mlx-quant-linux [--verify-all] [--bench] [--json]");
+        println!("usage: mlx-quant-linux [--verify-all] [--bench] [--a6000-status] [--json]");
         return ExitCode::SUCCESS;
     }
 
@@ -1131,17 +1173,32 @@ fn main() -> ExitCode {
     } else {
         Vec::new()
     };
+    let a6000 = if flags.a6000_status {
+        Some(fetch_a6000_status(&resolve_a6000_status_url()))
+    } else {
+        None
+    };
     let audits = build_audit_rows(&doorbell);
 
     if flags.json {
         print_json(&summary, &verifies, &benches, &audits);
     } else {
-        print_human(&summary, &verifies, &benches, &audits);
+        print_human(&summary, &verifies, &benches, &a6000, &audits);
     }
 
     let all_verify_ok = verifies.iter().all(|v| v.passed);
     let all_bench_ok = benches.iter().all(|b| b.parity_ok);
-    if !summary.guardian_healthy || !summary.polar_parity_ok || !summary.tequila_gpu_parity_ok || !all_verify_ok || !all_bench_ok {
+    let a6000_ok = match &a6000 {
+        Some(res) => res.is_ok(),
+        None => true,
+    };
+    if !summary.guardian_healthy
+        || !summary.polar_parity_ok
+        || !summary.tequila_gpu_parity_ok
+        || !all_verify_ok
+        || !all_bench_ok
+        || !a6000_ok
+    {
         return ExitCode::FAILURE;
     }
     ExitCode::SUCCESS

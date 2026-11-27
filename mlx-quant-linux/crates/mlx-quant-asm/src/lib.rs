@@ -70,7 +70,35 @@ pub fn ternary_2bit_dot_64(packed: &[u8; 16], activations: &[i8; 64]) -> i32 {
     {
         aarch64::ternary_2bit_dot_64_neon(packed, activations)
     }
-    #[cfg(not(target_arch = "aarch64"))]
+    #[cfg(target_arch = "x86_64")]
+    {
+        #[cfg(all(
+            target_feature = "avx512f",
+            target_feature = "avx512bw",
+            target_feature = "avx512vnni"
+        ))]
+        {
+            // SAFETY: Compile-time `target_feature` guarantees AVX-512F/BW/VNNI support.
+            unsafe { x86_64::ternary_2bit_dot_64_avx512(packed, activations) }
+        }
+        #[cfg(all(
+            target_feature = "avx2",
+            not(all(
+                target_feature = "avx512f",
+                target_feature = "avx512bw",
+                target_feature = "avx512vnni"
+            ))
+        ))]
+        {
+            // SAFETY: Compile-time `target_feature` guarantees AVX2 support.
+            unsafe { x86_64::ternary_2bit_dot_64_avx2(packed, activations) }
+        }
+        #[cfg(not(target_feature = "avx2"))]
+        {
+            mlx_quant_core::ternary::ternary_2bit_dot_64_scalar(packed, activations)
+        }
+    }
+    #[cfg(not(any(target_arch = "aarch64", target_arch = "x86_64")))]
     {
         mlx_quant_core::ternary::ternary_2bit_dot_64_scalar(packed, activations)
     }
@@ -89,7 +117,11 @@ pub fn ternary_2bit_gemv(
     {
         aarch64::ternary_2bit_gemv_neon(w_packed, x, y_out, rows, cols);
     }
-    #[cfg(not(target_arch = "aarch64"))]
+    #[cfg(target_arch = "x86_64")]
+    {
+        x86_64::ternary_2bit_gemv_x86(w_packed, x, y_out, rows, cols);
+    }
+    #[cfg(not(any(target_arch = "aarch64", target_arch = "x86_64")))]
     {
         mlx_quant_core::ternary::ternary_2bit_gemv_scalar(w_packed, x, y_out, rows, cols);
     }
@@ -109,7 +141,11 @@ pub fn int4_gemm(
     {
         aarch64::int4_gemm_neon(a_packed, b_t_packed, c_out, m, n, k);
     }
-    #[cfg(not(target_arch = "aarch64"))]
+    #[cfg(target_arch = "x86_64")]
+    {
+        x86_64::int4_gemm_x86(a_packed, b_t_packed, c_out, m, n, k);
+    }
+    #[cfg(not(any(target_arch = "aarch64", target_arch = "x86_64")))]
     {
         mlx_quant_core::ternary::int4_gemm_scalar(a_packed, b_t_packed, c_out, m, n, k);
     }
