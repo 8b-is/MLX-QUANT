@@ -1,103 +1,139 @@
-use crate::allocator::BumpAllocator;
-use std::sync::atomic::{AtomicU64, Ordering};
+//! Safe 64-byte aligned AMD CDNA3 (MI300X) Type-3 PM4 command ring wrapper.
+//!
+//! Uses [`mlx_quant_gpu::pm4::Pm4Ring`] for deterministic packet validation, wraparound,
+//! release-fenced doorbell tail tracking, and FNV-1a ring digests. The in-memory PM4 ring
+//! encoding is `Measured`; physical PCIe BAR2 MMIO doorbell submission is `DesignedDescriptor`.
 
-/// Standard AMD PM4 Packet3 Opcodes (Mocked for MLX-QUANT)
-#[repr(u16)]
-#[derive(Debug, Clone, Copy)]
-pub enum Pm4Opcode {
-    Nop = 0x10,
-    WriteData = 0x37,
-    DispatchDirect = 0x15, // Used to dispatch compute kernels (MatMul)
-    AcquireMem = 0x58,     // Cache synchronization / Memory barriers
+use crate::ExecutionMode;
+pub use mlx_quant_gpu::pm4::{Pm4Error, Pm4Opcode, Pm4Packet64, Pm4Ring};
+
+/// Safe wrapper around a 64-byte aligned 1024-DWORD AMD CDNA3 Type-3 PM4 ring buffer.
+#[repr(C, align(64))]
+pub struct AmdComputeRing {
+    ring: Pm4Ring<1024>,
+    mmio_mode: ExecutionMode,
 }
 
-/// Represents an AMD PM4 Command Packet
-/// CDNA3 (MI300X) architectures process these packets to dispatch compute kernels.
-#[repr(C)]
-#[derive(Debug, Clone, Copy)]
-pub struct AmdPacket {
-    pub header: u16,
-    pub opcode: u16,
-    pub addr_lo: u32,
-    pub addr_hi: u32,
-    pub size: u32,
-    // (Padded to 64 bytes for AQL standard alignment)
-    pub _pad: [u32; 11],
-}
-
-impl AmdPacket {
-    pub fn empty() -> Self {
-        Self {
-            header: 0,
-            opcode: 0,
-            addr_lo: 0,
-            addr_hi: 0,
-            size: 0,
-            _pad: [0; 11],
-        }
-    }
-
-    /// Constructs a PACKET3_DISPATCH_DIRECT to launch an MLX-QUANT kernel
-    pub fn dispatch_kernel(grid_size: u32, group_size: u32, kernel_addr: u64) -> Self {
-        Self {
-            header: 0xC000, // Packet3 Header Type
-            opcode: Pm4Opcode::DispatchDirect as u16,
-            addr_lo: (kernel_addr & 0xFFFFFFFF) as u32,
-            addr_hi: (kernel_addr >> 32) as u32,
-            size: grid_size * group_size,
-            _pad: [0; 11],
-        }
+impl Default for AmdComputeRing {
+    #[inline]
+    fn default() -> Self {
+        Self::new()
     }
 }
 
-/// A bare-metal AMD User Mode Queue (Ring Buffer)
-pub struct AmdComputeRing<'a> {
-    pub queue: *mut AmdPacket,
-    pub capacity: usize,
-    pub write_index: AtomicU64,
-    doorbell_ptr: *mut u64,
-    _marker: std::marker::PhantomData<&'a AmdPacket>,
-}
-
-impl<'a> AmdComputeRing<'a> {
-    /// Maps a ring buffer directly into the BumpAllocator, and sets up the PCIe BAR doorbell.
-    pub fn new(capacity: usize, pcie_bar2_doorbell_addr: usize, allocator: &'a BumpAllocator) -> Self {
-        let size_bytes = capacity * std::mem::size_of::<AmdPacket>();
-        
-        // Allocate the contiguous Command Ring Buffer
-        let queue_ptr = allocator.fast_alloc8(size_bytes) as *mut AmdPacket;
-
+impl AmdComputeRing {
+    /// Construct a fresh, zeroed, 64-byte aligned PM4 ring buffer.
+    #[inline]
+    pub const fn new() -> Self {
         Self {
-            queue: queue_ptr,
-            capacity,
-            write_index: AtomicU64::new(0),
-            doorbell_ptr: pcie_bar2_doorbell_addr as *mut u64,
-            _marker: std::marker::PhantomData,
+            ring: Pm4Ring::new(),
+            mmio_mode: ExecutionMode::DesignedDescriptor,
         }
     }
 
-    /// Appends a new command packet to the compute ring and rings the MI300X Doorbell.
-    #[inline(always)]
-    pub fn dispatch(&self, packet: AmdPacket) {
-        let w_idx = self.write_index.load(Ordering::Relaxed) as usize;
-        let ring_idx = w_idx % self.capacity;
+    /// Honest audit classification for physical MI300X PCIe MMIO transport.
+    #[inline]
+    pub const fn mmio_execution_mode(&self) -> ExecutionMode {
+        self.mmio_mode
+    }
 
-        // Write the packet directly to memory
-        unsafe {
-            std::ptr::write(self.queue.add(ring_idx), packet);
+    /// Enqueue a `PKT3_DISPATCH_DIRECT` compute grid launch packet, returning updated doorbell tail.
+    #[inline]
+    pub fn dispatch_kernel(
+        &mut self,
+        dim_x: u32,
+        dim_y: u32,
+        dim_z: u32,
+        dispatch_initiator: u32,
+    ) -> Result<u64, Pm4Error> {
+        self.ring
+            .push_dispatch_direct(dim_x, dim_y, dim_z, dispatch_initiator)
+    }
+
+    /// Enqueue an explicit 64-byte aligned [`Pm4Packet64`] frame.
+    #[inline]
+    pub fn dispatch_packet(&mut self, packet: &Pm4Packet64) -> Result<u64, Pm4Error> {
+        self.ring.submit_packet64(packet)
+    }
+
+    /// Enqueue a `PKT3_ACQUIRE_MEM` cache coherence / memory barrier packet.
+    #[inline]
+    pub fn acquire_barrier(
+        &mut self,
+        coher_cntl: u32,
+        size_bytes: u64,
+        base_addr: u64,
+    ) -> Result<u64, Pm4Error> {
+        self.ring.push_acquire_mem(coher_cntl, size_bytes, base_addr)
+    }
+
+    /// Enqueue a `PKT3_WRITE_DATA` memory write packet.
+    #[inline]
+    pub fn write_data(&mut self, dst_addr: u64, data: &[u32]) -> Result<u64, Pm4Error> {
+        self.ring.push_write_data(dst_addr, data)
+    }
+
+    /// Enqueue a `PKT3_NOP` packet with `body_words` zero words.
+    #[inline]
+    pub fn push_nop(&mut self, body_words: usize) -> Result<u64, Pm4Error> {
+        self.ring.push_nop(body_words)
+    }
+
+    /// Drain all currently queued DWORDs, advancing `rptr` to `wptr` and returning words drained.
+    #[inline]
+    pub fn drain(&mut self) -> usize {
+        let used = self.ring.used_words();
+        if used > 0 {
+            let _ = self.ring.consume(used);
         }
+        used
+    }
 
-        // Memory Barrier to guarantee the MI300X sees the packet data BEFORE the doorbell rings
-        std::sync::atomic::fence(Ordering::Release);
+    /// Consume an exact number of queued DWORDs.
+    #[inline]
+    pub fn consume(&mut self, word_count: usize) -> Result<(), Pm4Error> {
+        self.ring.consume(word_count)
+    }
 
-        // Advance write pointer
-        let new_w_idx = w_idx as u64 + 1;
-        self.write_index.store(new_w_idx, Ordering::Relaxed);
+    /// Latest release-fenced doorbell tail (`wptr`).
+    #[inline]
+    pub fn doorbell_tail(&self) -> u64 {
+        self.ring.doorbell_tail()
+    }
 
-        // Ring the AMD MI300X Doorbell over PCIe!
-        unsafe {
-            let _simulated_doorbell_write = new_w_idx;
-            std::hint::black_box(_simulated_doorbell_write);
-        }
+    /// Deterministic FNV-1a digest over the queued FIFO words `[rptr..wptr]`.
+    #[inline]
+    pub fn fnv1a_active_digest(&self) -> u64 {
+        self.ring.fnv1a_active_digest()
+    }
+
+    /// Deterministic FNV-1a digest over the full physical ring array and doorbell tail.
+    #[inline]
+    pub fn fnv1a_ring_digest(&self) -> u64 {
+        self.ring.fnv1a_ring_digest()
+    }
+
+    /// Number of queued DWORDs awaiting drain.
+    #[inline]
+    pub const fn used_words(&self) -> usize {
+        self.ring.used_words()
+    }
+
+    /// Number of free DWORD slots remaining.
+    #[inline]
+    pub const fn free_words(&self) -> usize {
+        self.ring.free_words()
+    }
+
+    /// Cumulative packets submitted into the ring.
+    #[inline]
+    pub const fn packets_submitted(&self) -> u64 {
+        self.ring.packets_submitted()
+    }
+
+    /// Read-only access to the underlying `Pm4Ring<1024>`.
+    #[inline]
+    pub const fn inner(&self) -> &Pm4Ring<1024> {
+        &self.ring
     }
 }

@@ -1,39 +1,274 @@
-use std::ptr::write_volatile;
+//! Safe Apple Metal GPU dispatch doorbell wrapping `mlx_quant_gpu::MetalRuntime`
+//! with a validated portable CPU ring simulator fallback when Metal is unavailable.
 
-/// Base MMIO Address for the Apple Silicon GPU (AGX) on M1 Pro
-pub const AGX_MMIO_BASE: usize = 0x280000000;
+use crate::ExecutionMode;
+use crate::pulsar::Pulsar;
+use crate::tensor::{DType, Tensor};
+use core::sync::atomic::{AtomicU32, AtomicU64, Ordering, fence};
+use mlx_quant_core::beehive::{TequilaConfig, tequila_ste_step_q16};
+use mlx_quant_core::ternary::{bitcos_gemv_scalar, ternary_2bit_gemv_scalar};
+use mlx_quant_gpu::{GpuError, MetalRuntime};
 
-/// The Doorbell register offset within the AGX MMIO space
-pub const AGX_DOORBELL_OFFSET: usize = 0x4000; 
+/// Hardware reference base MMIO address for Apple Silicon AGX (informational descriptor only).
+pub const AGX_MMIO_BASE: usize = 0x2_8000_0000;
+/// Hardware reference doorbell offset within AGX MMIO space (informational descriptor only).
+pub const AGX_DOORBELL_OFFSET: usize = 0x4000;
 
+/// Safe GPU submission doorbell with live Apple Metal GPU support and portable simulator fallback.
+#[derive(Debug)]
 pub struct AgxDoorbell {
-    doorbell_ptr: *mut u32,
+    metal: Option<MetalRuntime>,
+    ring_counter: AtomicU64,
+    last_gpu_ns: AtomicU64,
+    last_ring_id: AtomicU32,
+}
+
+impl Default for AgxDoorbell {
+    #[inline]
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl AgxDoorbell {
-    /// Maps the exact MMIO doorbell register for the Apple GPU
+    /// Initialize `AgxDoorbell`, attaching live `MetalRuntime` when running on Metal-capable macOS,
+    /// or cleanly falling back to `"Portable Ring Simulator"` otherwise.
     pub fn new() -> Self {
-        let phys_addr = AGX_MMIO_BASE + AGX_DOORBELL_OFFSET;
-        
-        // In a real bare-metal environment (or kernel module), we would map this physical 
-        // address into our virtual address space via page tables.
-        // For our userspace simulation, we mock the pointer.
+        let metal = MetalRuntime::new().ok();
         Self {
-            doorbell_ptr: phys_addr as *mut u32,
+            metal,
+            ring_counter: AtomicU64::new(0),
+            last_gpu_ns: AtomicU64::new(0),
+            last_ring_id: AtomicU32::new(0),
         }
     }
 
-    /// The "Singularity Event": Rings the doorbell.
-    /// This is an ultra-fast, single volatile write that instantly wakes the GPU
-    /// and forces it to pull from the Polar Galaxy spiral arms.
-    #[inline(always)]
-    pub fn ring(&self, ring_id: u32) {
-        unsafe {
-            // Write the ring ID (or queue index) to the doorbell register to trigger execution
-            // In a live environment, this is: write_volatile(self.doorbell_ptr, ring_id);
-            // We'll simulate it for safety in userspace so we don't segfault the host.
-            let _simulated_ring = ring_id; 
-            std::hint::black_box(_simulated_ring);
+    /// Construct a deterministic CPU-only simulator doorbell for parity and fallback tests.
+    pub fn new_simulator() -> Self {
+        Self {
+            metal: None,
+            ring_counter: AtomicU64::new(0),
+            last_gpu_ns: AtomicU64::new(0),
+            last_ring_id: AtomicU32::new(0),
         }
+    }
+
+    /// Honest backend mode string: `"Apple Metal Live GPU"` vs `"Portable Ring Simulator"`.
+    #[inline]
+    pub fn backend_mode(&self) -> &'static str {
+        if self.metal.is_some() {
+            "Apple Metal Live GPU"
+        } else {
+            "Portable Ring Simulator"
+        }
+    }
+
+    /// Execution mode classification for audit reporting.
+    #[inline]
+    pub fn execution_mode(&self) -> ExecutionMode {
+        if self.metal.is_some() {
+            ExecutionMode::Measured
+        } else {
+            ExecutionMode::DesignedDescriptor
+        }
+    }
+
+    /// Active Metal GPU device name, or `"Portable Ring Simulator"` when running on CPU fallback.
+    #[inline]
+    pub fn device_name(&self) -> &str {
+        match &self.metal {
+            Some(rt) => rt.device_name(),
+            None => "Portable Ring Simulator",
+        }
+    }
+
+    /// Returns `true` when backed by a live Apple Metal GPU runtime.
+    #[inline]
+    pub fn is_live_gpu(&self) -> bool {
+        self.metal.is_some()
+    }
+
+    /// Monotonic count of doorbell rings and GPU/simulator kernel submissions.
+    #[inline]
+    pub fn ring_counter(&self) -> u64 {
+        self.ring_counter.load(Ordering::Acquire)
+    }
+
+    /// Elapsed kernel nanoseconds recorded by the most recent submission.
+    #[inline]
+    pub fn last_gpu_ns(&self) -> u64 {
+        self.last_gpu_ns.load(Ordering::Acquire)
+    }
+
+    /// Most recently signaled ring ID.
+    #[inline]
+    pub fn last_ring_id(&self) -> u32 {
+        self.last_ring_id.load(Ordering::Acquire)
+    }
+
+    /// Signal a release-fenced queue doorbell event, returning the updated monotonic counter.
+    #[inline]
+    pub fn ring(&self, ring_id: u32) -> u64 {
+        fence(Ordering::Release);
+        self.last_ring_id.store(ring_id, Ordering::Release);
+        self.ring_counter.fetch_add(1, Ordering::AcqRel) + 1
+    }
+
+    /// Submit a 2-bit packed ternary GEMV (`y_out = W * x`), returning elapsed kernel nanoseconds.
+    pub fn submit_ternary_2bit_gemv(
+        &self,
+        w_packed: &[u8],
+        x: &[i8],
+        y_out: &mut [i32],
+        rows: usize,
+        cols: usize,
+    ) -> Result<u64, GpuError> {
+        let ns = if let Some(rt) = &self.metal {
+            rt.ternary_2bit_gemv(w_packed, x, y_out, rows, cols)?
+        } else {
+            let _ = u32::try_from(rows).map_err(|_| GpuError::DimensionOverflow)?;
+            let _ = u32::try_from(cols).map_err(|_| GpuError::DimensionOverflow)?;
+            let stride = cols.div_ceil(4);
+            let expected_w = rows
+                .checked_mul(stride)
+                .ok_or(GpuError::DimensionOverflow)?;
+            if w_packed.len() < expected_w || x.len() < cols || y_out.len() < rows {
+                return Err(GpuError::InvalidBufferLength);
+            }
+            let t0 = Pulsar::now_ticks();
+            ternary_2bit_gemv_scalar(w_packed, x, y_out, rows, cols);
+            let t1 = Pulsar::now_ticks();
+            Pulsar::elapsed_ns(t0, t1)
+        };
+        self.last_gpu_ns.store(ns, Ordering::Release);
+        self.ring_counter.fetch_add(1, Ordering::AcqRel);
+        Ok(ns)
+    }
+
+    /// Submit a BITCOS sparse ternary GEMV, returning elapsed kernel nanoseconds.
+    #[allow(clippy::too_many_arguments)]
+    pub fn submit_bitcos_gemv(
+        &self,
+        presence: &[u8],
+        signs: &[u8],
+        row_sign_byte_offsets: &[u32],
+        x: &[i8],
+        y_out: &mut [i32],
+        rows: usize,
+        cols: usize,
+    ) -> Result<u64, GpuError> {
+        let ns = if let Some(rt) = &self.metal {
+            rt.bitcos_gemv(
+                presence,
+                signs,
+                row_sign_byte_offsets,
+                x,
+                y_out,
+                rows,
+                cols,
+            )?
+        } else {
+            let _ = u32::try_from(rows).map_err(|_| GpuError::DimensionOverflow)?;
+            let _ = u32::try_from(cols).map_err(|_| GpuError::DimensionOverflow)?;
+            let p_row_bytes = cols.div_ceil(8);
+            let expected_p = rows
+                .checked_mul(p_row_bytes)
+                .ok_or(GpuError::DimensionOverflow)?;
+            if presence.len() < expected_p
+                || row_sign_byte_offsets.len() < rows
+                || x.len() < cols
+                || y_out.len() < rows
+            {
+                return Err(GpuError::InvalidBufferLength);
+            }
+            let rem_bits = cols & 7;
+            for (r, &offset) in row_sign_byte_offsets[..rows].iter().enumerate() {
+                let off = offset as usize;
+                if off > signs.len() {
+                    return Err(GpuError::InvalidBufferLength);
+                }
+                if p_row_bytes > 0 {
+                    let row_pres = &presence[r * p_row_bytes..(r + 1) * p_row_bytes];
+                    let mut nnz = 0usize;
+                    for (b_idx, &byte) in row_pres.iter().enumerate() {
+                        let masked = if b_idx + 1 == p_row_bytes && rem_bits != 0 {
+                            byte & ((1u8 << rem_bits) - 1)
+                        } else {
+                            byte
+                        };
+                        nnz += masked.count_ones() as usize;
+                    }
+                    if off.saturating_add(nnz.div_ceil(8)) > signs.len() {
+                        return Err(GpuError::InvalidBufferLength);
+                    }
+                }
+            }
+            let t0 = Pulsar::now_ticks();
+            bitcos_gemv_scalar(
+                presence,
+                signs,
+                row_sign_byte_offsets,
+                x,
+                y_out,
+                rows,
+                cols,
+            );
+            let t1 = Pulsar::now_ticks();
+            Pulsar::elapsed_ns(t0, t1)
+        };
+        self.last_gpu_ns.store(ns, Ordering::Release);
+        self.ring_counter.fetch_add(1, Ordering::AcqRel);
+        Ok(ns)
+    }
+
+    /// Submit a Q15.16 Tequila deadzone reactivation STE update, returning elapsed kernel nanoseconds.
+    pub fn submit_tequila_ste_q16(
+        &self,
+        weights_q16: &mut [i32],
+        grads_q16: &[i32],
+        cfg: TequilaConfig,
+    ) -> Result<u64, GpuError> {
+        let ns = if let Some(rt) = &self.metal {
+            rt.tequila_ste_with_config(weights_q16, grads_q16, cfg)?
+        } else {
+            if weights_q16.len() != grads_q16.len() {
+                return Err(GpuError::InvalidBufferLength);
+            }
+            let _ = u32::try_from(weights_q16.len()).map_err(|_| GpuError::DimensionOverflow)?;
+            let t0 = Pulsar::now_ticks();
+            tequila_ste_step_q16(weights_q16, grads_q16, cfg);
+            let t1 = Pulsar::now_ticks();
+            Pulsar::elapsed_ns(t0, t1)
+        };
+        self.last_gpu_ns.store(ns, Ordering::Release);
+        self.ring_counter.fetch_add(1, Ordering::AcqRel);
+        Ok(ns)
+    }
+
+    /// Submit a `Tensor`-backed 2-bit ternary GEMV (`[rows, cols] * [cols] -> [rows]`).
+    pub fn submit_tensor_gemv(
+        &self,
+        w: &Tensor<'_>,
+        x: &Tensor<'_>,
+        y: &mut Tensor<'_>,
+    ) -> Result<u64, GpuError> {
+        if w.dtype() != DType::Ternary2Bit || x.dtype() != DType::Int8 || y.dtype() != DType::Int32
+        {
+            return Err(GpuError::InvalidArgument);
+        }
+        let w_shape = w.shape();
+        let x_shape = x.shape();
+        let y_shape = y.shape();
+        if w_shape.ndim != 2 || x_shape.ndim != 1 || y_shape.ndim != 1 {
+            return Err(GpuError::InvalidArgument);
+        }
+        let rows = w_shape.dims[0];
+        let cols = w_shape.dims[1];
+        if x_shape.dims[0] != cols || y_shape.dims[0] != rows {
+            return Err(GpuError::InvalidBufferLength);
+        }
+        let x_i8 = x.as_i8_slice().ok_or(GpuError::InvalidBufferLength)?;
+        let y_i32 = y.as_i32_slice_mut().ok_or(GpuError::InvalidBufferLength)?;
+        self.submit_ternary_2bit_gemv(w.as_bytes(), &x_i8[..cols], &mut y_i32[..rows], rows, cols)
     }
 }

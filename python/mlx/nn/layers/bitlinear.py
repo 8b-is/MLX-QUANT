@@ -34,6 +34,33 @@ def activation_quant(x: mx.array) -> mx.array:
     return mx.clip(mx.round(x * scale), -128, 127) / scale
 
 
+@partial(mx.compile, shapeless=True)
+def activation_quant_int4(x: mx.array) -> mx.array:
+    """Per-token simulated symmetric INT4 activation quantization (`[-7, +7]`) for `H-BitLinear`."""
+    abs_max = mx.clip(mx.abs(x).max(axis=-1, keepdims=True), 1e-5, None)
+    scale = 7.0 / abs_max
+    return mx.clip(mx.round(x * scale), -7.0, 7.0) / scale
+
+
+def hadamard_wht_mx(x: mx.array) -> mx.array:
+    """
+    Orthonormal Fast Walsh-Hadamard Transform (`WHT(x) / sqrt(d)`) on power-of-2 last dim
+    for BitNet v2 `H-BitLinear` (`arXiv:2504.18415`).
+    """
+    d = x.shape[-1]
+    if d == 0 or (d & (d - 1)) != 0:
+        raise ValueError(f"hadamard_wht_mx requires power-of-2 last dim, got {d}")
+    out = x
+    h = 1
+    while h < d:
+        reshaped = out.reshape(*x.shape[:-1], d // (2 * h), 2, h)
+        a = reshaped[..., 0, :]
+        b = reshaped[..., 1, :]
+        out = mx.concatenate([a + b, a - b], axis=-1).reshape(x.shape)
+        h *= 2
+    return out * (d ** -0.5)
+
+
 def weight_quant(w: mx.array, threshold: float = 0.5, group_size: int = 64) -> mx.array:
     r"""True thresholded ternary weight quantization (BitNet b1.58).
 
@@ -54,8 +81,8 @@ def weight_quant(w: mx.array, threshold: float = 0.5, group_size: int = 64) -> m
     ``threshold`` scales the zero band as a fraction of ``scale``; the default
     ``0.5`` is the `round` tie point (BitNet's own rule).
     """
-    if group_size is None or w.ndim < 2:
-        scale = mx.abs(w).mean()
+    if group_size is None or w.ndim < 2 or w.shape[-1] < group_size or (w.shape[-1] % group_size) != 0:
+        scale = mx.abs(w).mean(axis=-1, keepdims=True) if w.ndim >= 2 else mx.abs(w).mean()
         return mx.where(mx.abs(w) < threshold * scale, 0.0, mx.sign(w) * scale)
     orig_shape = w.shape
     k = orig_shape[-1]
@@ -137,6 +164,10 @@ class BitLinear(Module):
         binary: bool = False,
         norm_eps: float = 1e-6,
         deployed_forward: bool = True,
+        tequila_lambda: float = 0.0,
+        use_hadamard: bool = False,
+        act_bits: int = 8,
+        threshold: float = 0.5,
     ) -> None:
         super().__init__()
         scale = (1.0 / input_dims) ** 0.5
@@ -149,6 +180,10 @@ class BitLinear(Module):
             self.bias = mx.zeros((output_dims,))
         self.binary = binary
         self.deployed_forward = deployed_forward
+        self.tequila_lambda = float(tequila_lambda)
+        self.use_hadamard = bool(use_hadamard)
+        self.act_bits = int(act_bits)
+        self.threshold = float(threshold)
         if not deployed_forward:
             self.norm = RMSNorm(input_dims, eps=norm_eps)
 
@@ -156,22 +191,35 @@ class BitLinear(Module):
         return (
             f"input_dims={self.weight.shape[1]}, output_dims={self.weight.shape[0]}, "
             f"bias={'bias' in self}, binary={self.binary}, "
-            f"deployed_forward={self.deployed_forward}"
+            f"deployed_forward={self.deployed_forward}, "
+            f"tequila_lambda={self.tequila_lambda}, use_hadamard={self.use_hadamard}, "
+            f"act_bits={self.act_bits}, threshold={self.threshold}"
         )
 
     def __call__(self, x: mx.array) -> mx.array:
         w = self["weight"]
 
-        quant_fn = binary_weight_quant if self.binary else weight_quant
-        w_quant = _quantize_ste(w, quant_fn(w))
+        if self.binary:
+            w_q = binary_weight_quant(w)
+        else:
+            w_q = weight_quant(w, threshold=self.threshold)
+        w_quant = _quantize_ste(w, w_q)
 
-        if self.deployed_forward:
-            if "bias" in self:
-                return mx.addmm(self["bias"], x, w_quant.T)
-            return x @ w_quant.T
+        x_in = x if self.deployed_forward else self.norm(x)
+        if self.use_hadamard:
+            x_in = hadamard_wht_mx(x_in)
+        if not self.deployed_forward or self.use_hadamard or self.act_bits == 4:
+            act_q_fn = activation_quant_int4 if self.act_bits == 4 else activation_quant
+            x_in = _quantize_ste(x_in, act_q_fn(x_in))
 
-        x_norm = self.norm(x)
-        x_quant = _quantize_ste(x_norm, activation_quant(x_norm))
         if "bias" in self:
-            return mx.addmm(self["bias"], x_quant, w_quant.T)
-        return x_quant @ w_quant.T
+            out = mx.addmm(self["bias"], x_in, w_quant.T)
+        else:
+            out = x_in @ w_quant.T
+
+        if self.tequila_lambda > 0.0 and not self.binary:
+            deadzone = mx.stop_gradient((w_q == 0.0).astype(w.dtype))
+            dyn_bias = self.tequila_lambda * mx.sum(w * deadzone, axis=-1)
+            out = out + dyn_bias
+
+        return out

@@ -86,3 +86,6 @@ mlx-quant-linux/target/
 
 # CI benchmark artifact (published as a workflow artifact, not tracked)
 benchmark_results.json
+
+# Local training checkpoints & model bundles (uploaded to Hugging Face)
+/out/

@@ -1,77 +1,186 @@
-use crate::tensor::{Tensor, DType};
-#[cfg(target_arch = "aarch64")]
-use std::arch::asm;
+//! Real pure-integer / NEON / cross-arch quantized matrix kernels via `mlx-quant-asm`.
 
-/// The Compute Singularity
-/// Executes bare-metal AArch64 SIMD inline assembly for extreme Matrix Multiplication.
+use crate::tensor::{DType, Tensor};
+use core::fmt;
+
+/// Errors returned by [`ComputeSingularity`] kernel validation and dispatch.
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub enum MatmulError {
+    UnsupportedDTypeCombination,
+    InvalidShape,
+    DimensionMismatch,
+    BufferTooSmall,
+    UnalignedOutput,
+}
+
+impl fmt::Display for MatmulError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::UnsupportedDTypeCombination => {
+                f.write_str("unsupported tensor dtype combination for ComputeSingularity")
+            }
+            Self::InvalidShape => f.write_str("invalid tensor rank or dimensions"),
+            Self::DimensionMismatch => f.write_str("matrix/vector inner or outer dimensions mismatch"),
+            Self::BufferTooSmall => f.write_str("backing tensor buffer smaller than required"),
+            Self::UnalignedOutput => f.write_str("output Int32 tensor buffer is unaligned or wrong dtype"),
+        }
+    }
+}
+
+impl std::error::Error for MatmulError {}
+
+/// Executes real cross-architecture / AArch64 NEON SIMD matrix kernels with zero stubs.
 pub struct ComputeSingularity;
 
 impl ComputeSingularity {
-    pub fn execute_matmul(a: &Tensor, b: &Tensor, c: &mut Tensor) {
-        assert_eq!(a.shape[1], b.shape[0], "Matrix dimensions must match for MatMul");
-        
-        match (a.dtype, b.dtype) {
-            (DType::Quantized4Bit, DType::Quantized4Bit) => Self::matmul_int4_aarch64(a, b, c),
-            _ => panic!("Currently only INT4 Compute Singularity is active!"),
+    /// Execute exact quantized matrix multiplication or GEMV:
+    /// - `(DType::Ternary2Bit, DType::Int8) -> DType::Int32`: `a` `[rows, cols]`, `b` `[cols]`, `c` `[rows]`
+    /// - `(DType::Int4Packed, DType::Int4Packed) -> DType::Int32`: `a` `[m, k]`, `b` transposed `[n, k]`, `c` `[m, n]`
+    pub fn execute_matmul(a: &Tensor, b: &Tensor, c: &mut Tensor) -> Result<(), MatmulError> {
+        if c.dtype() != DType::Int32 {
+            return Err(MatmulError::UnsupportedDTypeCombination);
+        }
+
+        match (a.dtype(), b.dtype()) {
+            (DType::Ternary2Bit, DType::Int8) => {
+                let a_shape = a.shape();
+                let b_shape = b.shape();
+                let c_shape = c.shape();
+                if a_shape.ndim != 2 || b_shape.ndim != 1 || c_shape.ndim != 1 {
+                    return Err(MatmulError::InvalidShape);
+                }
+                let rows = a_shape.dims[0];
+                let cols = a_shape.dims[1];
+                if b_shape.dims[0] != cols || c_shape.dims[0] != rows {
+                    return Err(MatmulError::DimensionMismatch);
+                }
+
+                let needed_w = rows
+                    .checked_mul(cols.div_ceil(4))
+                    .ok_or(MatmulError::DimensionMismatch)?;
+                let w_bytes = a.as_bytes();
+                if w_bytes.len() < needed_w {
+                    return Err(MatmulError::BufferTooSmall);
+                }
+
+                let x_i8 = b.as_i8_slice().ok_or(MatmulError::BufferTooSmall)?;
+                if x_i8.len() < cols {
+                    return Err(MatmulError::BufferTooSmall);
+                }
+                let y_i32 = c.as_i32_slice_mut().ok_or(MatmulError::UnalignedOutput)?;
+                if y_i32.len() < rows {
+                    return Err(MatmulError::BufferTooSmall);
+                }
+
+                mlx_quant_asm::ternary_2bit_gemv(
+                    &w_bytes[..needed_w],
+                    &x_i8[..cols],
+                    &mut y_i32[..rows],
+                    rows,
+                    cols,
+                );
+                Ok(())
+            }
+            (DType::Int4Packed, DType::Int4Packed) => {
+                let a_shape = a.shape();
+                let b_shape = b.shape();
+                let c_shape = c.shape();
+                if a_shape.ndim != 2 || b_shape.ndim != 2 || c_shape.ndim != 2 {
+                    return Err(MatmulError::InvalidShape);
+                }
+                let m = a_shape.dims[0];
+                let k = a_shape.dims[1];
+                let n = b_shape.dims[0];
+                let b_k = b_shape.dims[1];
+                if k != b_k || c_shape.dims[0] != m || c_shape.dims[1] != n {
+                    return Err(MatmulError::DimensionMismatch);
+                }
+
+                let k_bytes = k.div_ceil(2);
+                let needed_a = m
+                    .checked_mul(k_bytes)
+                    .ok_or(MatmulError::DimensionMismatch)?;
+                let needed_b = n
+                    .checked_mul(k_bytes)
+                    .ok_or(MatmulError::DimensionMismatch)?;
+                let needed_c = m.checked_mul(n).ok_or(MatmulError::DimensionMismatch)?;
+
+                let a_bytes = a.as_bytes();
+                let b_bytes = b.as_bytes();
+                if a_bytes.len() < needed_a || b_bytes.len() < needed_b {
+                    return Err(MatmulError::BufferTooSmall);
+                }
+                let c_i32 = c.as_i32_slice_mut().ok_or(MatmulError::UnalignedOutput)?;
+                if c_i32.len() < needed_c {
+                    return Err(MatmulError::BufferTooSmall);
+                }
+
+                mlx_quant_asm::int4_gemm(
+                    &a_bytes[..needed_a],
+                    &b_bytes[..needed_b],
+                    &mut c_i32[..needed_c],
+                    m,
+                    n,
+                    k,
+                );
+                Ok(())
+            }
+            _ => Err(MatmulError::UnsupportedDTypeCombination),
         }
     }
 
-    /// Bare-Metal AArch64 Inline Assembly for INT4 Matrix Multiplication.
-    /// Unpacks sub-bytes and executes hardware-accelerated NEON dot products.
-    #[inline(never)]
-    fn matmul_int4_aarch64(a: &Tensor, b: &Tensor, c: &mut Tensor) {
-        #[cfg(target_arch = "aarch64")]
-        unsafe {
-            // We are dropping directly into AArch64 Assembly.
-            // 1. Load packed INT4 weights (2 values per byte).
-            // 2. Unpack using bitwise shifts directly in NEON registers.
-            // 3. Execute `sdot` (Signed Dot Product) on the unpacked registers.
-            
-            let m = a.shape[0];
-            let k = a.shape[1]; // Pack ratio is 2 (so physical bytes = k / 2)
-            let _n = b.shape[1];
-
-            let a_ptr = a.data as *const u8;
-            let b_ptr = b.data as *const u8;
-            let c_ptr = c.data as *mut u16; // Output is FP16 for precision
-
-            // SIMULATED INLINE ASM BLOCK (Demonstrating the logic)
-            // In a real run, this loops over the chunks of memory.
-            asm!(
-                // --- THE SINGULARITY EVENT ---
-                // Load 16 bytes (32 INT4 values) from Matrix A into vector register v0
-                "ld1 {{v0.16b}}, [{a_ptr}]",
-                
-                // Load 16 bytes (32 INT4 values) from Matrix B into vector register v1
-                "ld1 {{v1.16b}}, [{b_ptr}]",
-
-                // Unpack lower 4 bits: `and` with 0x0F
-                "movi v2.16b, #0x0F",
-                "and v3.16b, v0.16b, v2.16b", // A lower
-                "and v4.16b, v1.16b, v2.16b", // B lower
-
-                // Unpack upper 4 bits: logical shift right by 4
-                "ushr v5.16b, v0.16b, #4",    // A upper
-                "ushr v6.16b, v1.16b, #4",    // B upper
-
-                // Execute NEON Signed Dot Product (`sdot`)
-                // Accumulate results into 32-bit registers (v7, v8)
-                "movi v7.4s, #0",
-                "movi v8.4s, #0",
-                "sdot v7.4s, v3.16b, v4.16b", // Lower dot product
-                "sdot v8.4s, v5.16b, v6.16b", // Upper dot product
-
-                // Add them together
-                "add v7.4s, v7.4s, v8.4s",
-
-                // (In a full kernel, we would convert to FP16 and store to `c_ptr`)
-                // We're leaving the math in the registers for maximum TTFT.
-
-                a_ptr = in(reg) a_ptr,
-                b_ptr = in(reg) b_ptr,
-                out("v0") _, out("v1") _, out("v2") _, out("v3") _,
-                out("v4") _, out("v5") _, out("v6") _, out("v7") _, out("v8") _,
-            );
+    /// Execute BITCOS sparse presence+sign ternary GEMV via `mlx_quant_asm::bitcos_gemv`.
+    pub fn execute_bitcos_gemv(
+        presence: &[u8],
+        signs: &[u8],
+        offsets: &[u32],
+        x: &[i8],
+        y_out: &mut [i32],
+        rows: usize,
+        cols: usize,
+    ) -> Result<(), MatmulError> {
+        let p_row_bytes = cols.div_ceil(8);
+        let needed_p = rows
+            .checked_mul(p_row_bytes)
+            .ok_or(MatmulError::DimensionMismatch)?;
+        if presence.len() < needed_p
+            || offsets.len() < rows
+            || x.len() < cols
+            || y_out.len() < rows
+        {
+            return Err(MatmulError::BufferTooSmall);
         }
+
+        let rem_bits = cols & 7;
+        for (r, &off_u32) in offsets[..rows].iter().enumerate() {
+            let off = off_u32 as usize;
+            if off > signs.len() {
+                return Err(MatmulError::BufferTooSmall);
+            }
+            if p_row_bytes > 0 {
+                let row_p = &presence[r * p_row_bytes..(r + 1) * p_row_bytes];
+                let mut nnz = 0usize;
+                for (b_idx, &byte) in row_p.iter().enumerate() {
+                    let masked = if b_idx + 1 == p_row_bytes && rem_bits != 0 {
+                        byte & ((1u8 << rem_bits) - 1)
+                    } else {
+                        byte
+                    };
+                    nnz += masked.count_ones() as usize;
+                }
+                if off.saturating_add(nnz.div_ceil(8)) > signs.len() {
+                    return Err(MatmulError::BufferTooSmall);
+                }
+            }
+        }
+
+        mlx_quant_asm::bitcos_gemv(presence, signs, offsets, x, y_out, rows, cols);
+        Ok(())
+    }
+
+    /// Execute 16-element in-place NEON/scalar saturating Walsh-Hadamard transform (`H-BitLinear`).
+    #[inline]
+    pub fn execute_hadamard_wht_16(block: &mut [i32; 16]) {
+        mlx_quant_asm::hadamard_wht_16(block);
     }
 }

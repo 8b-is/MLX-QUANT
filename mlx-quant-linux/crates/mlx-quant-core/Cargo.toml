@@ -1,0 +1,9 @@
+[package]
+name = "mlx-quant-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lib]
+name = "mlx_quant_core"
+path = "src/lib.rs"

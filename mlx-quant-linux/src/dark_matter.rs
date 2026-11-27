@@ -1,12 +1,34 @@
-/// Dark Matter: Ghost Memory / Zero-Page Deduplication
-/// Maps massive sparse (MoE) tensors to a single physical zero-page in RAM.
+//! Pure-integer zero-page deduplication descriptor for sparse MoE tensor mappings.
+
+use crate::ExecutionMode;
+use mlx_quant_core::ratio::Ratio;
+
+/// Descriptor capturing virtual sparse tensor bytes vs physical zero-page size.
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub struct SparseZeroPageDescriptor {
+    pub virtual_bytes: usize,
+    pub physical_page_bytes: usize,
+    pub deduplication_ratio: Ratio,
+    pub mode: ExecutionMode,
+}
+
+/// Sparse zero-page virtual mapping planner (OS fault-handler page sharing is `DesignedDescriptor`).
 pub struct DarkMatter;
 
 impl DarkMatter {
-    /// Maps a 4GB sparse tensor to a single 16KB physical memory page.
-    pub fn ghost_map_sparse_tensor(_size: usize) -> *mut u8 {
-        // In a real kernel, we would use mmap with MAP_ANONYMOUS and intercept page faults
-        // to point to the system zero-page until written to.
-        std::ptr::null_mut()
+    /// Compute the exact rational deduplication descriptor for `virtual_bytes` backed by a single
+    /// physical zero page of `page_size` bytes.
+    #[inline]
+    pub const fn ghost_map_sparse_tensor(
+        virtual_bytes: usize,
+        page_size: usize,
+    ) -> SparseZeroPageDescriptor {
+        let eff_page = if page_size == 0 { 16_384 } else { page_size };
+        SparseZeroPageDescriptor {
+            virtual_bytes,
+            physical_page_bytes: eff_page,
+            deduplication_ratio: Ratio::new(virtual_bytes as u64, eff_page as u64),
+            mode: ExecutionMode::DesignedDescriptor,
+        }
     }
 }

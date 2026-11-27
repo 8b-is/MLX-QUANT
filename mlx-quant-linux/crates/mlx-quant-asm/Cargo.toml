@@ -1,0 +1,16 @@
+[package]
+name = "mlx-quant-asm"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lib]
+name = "mlx_quant_asm"
+path = "src/lib.rs"
+
+[features]
+default = []
+apple-amx = []
+
+[dependencies]
+mlx-quant-core = { path = "../mlx-quant-core" }

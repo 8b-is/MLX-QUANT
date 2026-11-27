@@ -1,49 +1,68 @@
-use crate::allocator::BumpAllocator;
-use crate::tensor::{Tensor, DType};
-use std::fs::File;
-#[cfg(target_os = "linux")]
-use std::os::unix::io::AsRawFd;
+//! Bounded zero-panic reader portal loading tensor bytes directly into [`BumpAllocator`].
 
-/// The I/O Blackhole Portal
-/// A zero-copy DMA (Direct Memory Access) tunnel that bypasses the CPU completely.
-/// It sucks raw weight data directly from an NVMe SSD into the O(1) Tensor Cache.
+use crate::allocator::BumpAllocator;
+use crate::tensor::{DType, Shape, Tensor};
+use std::fs::File;
+use std::io::{self, Read};
+
+/// Bounded tensor loader into an epoch-scoped [`BumpAllocator`] arena.
 pub struct IoBlackhole<'a> {
     allocator: &'a BumpAllocator,
 }
 
 impl<'a> IoBlackhole<'a> {
-    pub fn new(allocator: &'a BumpAllocator) -> Self {
+    /// Construct an [`IoBlackhole`] bound to `allocator`.
+    #[inline]
+    pub const fn new(allocator: &'a BumpAllocator) -> Self {
         Self { allocator }
     }
 
-    /// Engages the Event Horizon.
-    /// In a true bare-metal NVMe driver, we configure the PCIe root complex to 
-    /// DMA transfer the blocks directly into our BumpAllocator memory pool.
-    pub fn suck_weights_from_disk(&self, _file: &File, shape: Vec<usize>, dtype: DType) -> Tensor<'a> {
-        // 1. Allocate a Tensor natively in the hardware pool (or pull from O(1) cache)
-        let tensor = Tensor::new(shape, dtype, self.allocator);
+    /// Read at most `tensor.byte_len()` bytes from `reader` into a freshly allocated [`Tensor`].
+    ///
+    /// Short reads and early EOF are handled safely: unread trailing bytes are deterministically
+    /// zero-padded, and `(tensor, bytes_read, fnv1a_digest)` is returned.
+    pub fn load_bytes_from_reader(
+        &self,
+        reader: &mut impl Read,
+        shape: Shape,
+        dtype: DType,
+    ) -> io::Result<(Tensor<'a>, usize, u64)> {
+        let mut tensor = Tensor::new(shape, dtype, self.allocator).ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::OutOfMemory,
+                "BumpAllocator exhausted or invalid tensor shape",
+            )
+        })?;
 
-        // 2. The Blackhole Event:
-        // Normally, you would use `file.read()`, which copies from Disk -> OS Buffer -> CPU -> GPU.
-        // Instead, we use `mmap` (or direct NVMe DMA submission queues) to map the file 
-        // directly into the physical address of our Tensor.
-        
-        #[cfg(target_os = "linux")]
-        {
-            // let fd = file.as_raw_fd();
-            // unsafe {
-            //     libc::mmap(
-            //         tensor.data as *mut libc::c_void,
-            //         tensor.alloc_size,
-            //         libc::PROT_READ,
-            //         libc::MAP_PRIVATE | libc::MAP_FIXED,
-            //         fd,
-            //         0,
-            //     );
-            // }
+        let buf = tensor.as_bytes_mut();
+        let cap = buf.len();
+        let mut total_read = 0usize;
+
+        while total_read < cap {
+            match reader.read(&mut buf[total_read..]) {
+                Ok(0) => break,
+                Ok(n) => total_read += n,
+                Err(ref e) if e.kind() == io::ErrorKind::Interrupted => continue,
+                Err(e) => return Err(e),
+            }
         }
 
-        // The data instantly materializes in the BumpAllocator pool. Zero CPU cycles wasted.
-        tensor
+        if total_read < cap {
+            buf[total_read..].fill(0);
+        }
+
+        let digest = tensor.fnv1a_digest();
+        Ok((tensor, total_read, digest))
+    }
+
+    /// Bounded read from an open [`std::fs::File`] directly into an arena-allocated [`Tensor`].
+    #[inline]
+    pub fn suck_weights_from_disk(
+        &self,
+        file: &mut File,
+        shape: Shape,
+        dtype: DType,
+    ) -> io::Result<(Tensor<'a>, usize, u64)> {
+        self.load_bytes_from_reader(file, shape, dtype)
     }
 }

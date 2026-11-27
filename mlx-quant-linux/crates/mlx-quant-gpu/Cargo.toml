@@ -1,0 +1,17 @@
+[package]
+name = "mlx-quant-gpu"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+build = "build.rs"
+
+[lib]
+name = "mlx_quant_gpu"
+path = "src/lib.rs"
+
+[features]
+default = ["std"]
+std = []
+
+[dependencies]
+mlx-quant-core = { path = "../mlx-quant-core" }

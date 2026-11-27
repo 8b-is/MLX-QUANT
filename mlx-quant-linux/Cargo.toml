@@ -1,4 +1,24 @@
+[workspace]
+resolver = "3"
+members = [
+    ".",
+    "crates/mlx-quant-core",
+    "crates/mlx-quant-asm",
+    "crates/mlx-quant-gpu",
+]
+
+[workspace.package]
+version = "3.0.0-alpha.1"
+edition = "2024"
+license = "MIT"
+
 [package]
 name = "mlx-quant-linux"
-version = "0.1.0"
-edition = "2024"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+mlx-quant-core = { path = "crates/mlx-quant-core" }
+mlx-quant-asm = { path = "crates/mlx-quant-asm" }
+mlx-quant-gpu = { path = "crates/mlx-quant-gpu" }
