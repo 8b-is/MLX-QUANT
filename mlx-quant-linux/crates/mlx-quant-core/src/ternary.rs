@@ -841,3 +841,111 @@ pub fn quantize_weights_ternary_absmean_q16(weights_q16: &[i32], out_trits: &mut
 
     Ratio::from_u128(sum_abs, (n as u128) * (Q16_ONE as u128))
 }
+
+/// Exact Q15.16 per-plane scales for Any-Rate 2-plane progressive residual ternary (`arXiv:2611.34402`).
+#[derive(Copy, Clone, Debug, Default, PartialEq, Eq)]
+pub struct AnyRate2PlaneScales {
+    pub scale0_q16: i32,
+    pub scale1_q16: i32,
+}
+
+/// Helper: quantize one Q15.16 slice with exact `0.7 * mean(|w|)` threshold (`10*n*|w| > 7*sum|w|`)
+/// and return the surviving non-zero abs-mean scale in Q15.16.
+#[inline]
+fn quantize_plane_07_q16(vals_q16: &[i32], out_trits: &mut [Trit]) -> i32 {
+    let n = vals_q16.len();
+    if n == 0 {
+        return 0;
+    }
+    let mut sum_abs: u128 = 0;
+    for &w in vals_q16 {
+        sum_abs += (w as i64).unsigned_abs() as u128;
+    }
+    if sum_abs == 0 {
+        out_trits.fill(Trit::Zero);
+        return 0;
+    }
+    let lhs_mul = (n as u128) * 10u128;
+    let rhs_thresh = sum_abs * 7u128;
+    let mut nz_sum: u128 = 0;
+    let mut nz_cnt: u128 = 0;
+    for (&w, dst) in vals_q16.iter().zip(out_trits.iter_mut()) {
+        let abs_w = (w as i64).unsigned_abs() as u128;
+        if lhs_mul * abs_w > rhs_thresh {
+            *dst = if w > 0 { Trit::Pos } else { Trit::Neg };
+            nz_sum += abs_w;
+            nz_cnt += 1;
+        } else {
+            *dst = Trit::Zero;
+        }
+    }
+    (nz_sum + (nz_cnt >> 1))
+        .checked_div(nz_cnt)
+        .map_or(0, |q| q.min(i32::MAX as u128) as i32)
+}
+
+/// Zero-alloc, zero-float `#![no_std]` **Any-Rate 2-Plane Progressive Residual Ternary**
+/// (`arXiv:2611.34402`) in Q15.16 fixed-point:
+/// - Plane 0 (`1.6 bpw` Base-243): coarse ternary sketch `T_0` with scale `scale0_q16`
+/// - Plane 1 (`3.2 bpw` cumulative): residual ternary plane `T_1 = Q(w - T_0 * scale0_q16)`
+///
+/// Both 1-plane and 2-plane inference read from the exact same nested buffers!
+pub fn quantize_anyrate_2plane_q16(
+    weights_q16: &[i32],
+    out_plane0: &mut [Trit],
+    out_plane1: &mut [Trit],
+    scratch_residual_q16: &mut [i32],
+) -> AnyRate2PlaneScales {
+    let n = weights_q16.len();
+    assert_eq!(out_plane0.len(), n, "out_plane0 length mismatch");
+    assert_eq!(out_plane1.len(), n, "out_plane1 length mismatch");
+    assert_eq!(scratch_residual_q16.len(), n, "scratch_residual length mismatch");
+
+    let scale0_q16 = quantize_plane_07_q16(weights_q16, out_plane0);
+    for i in 0..n {
+        let q0 = (out_plane0[i].as_i8() as i64) * (scale0_q16 as i64);
+        let r = (weights_q16[i] as i64) - q0;
+        scratch_residual_q16[i] = r.clamp(i32::MIN as i64, i32::MAX as i64) as i32;
+    }
+    let scale1_q16 = quantize_plane_07_q16(scratch_residual_q16, out_plane1);
+    AnyRate2PlaneScales {
+        scale0_q16,
+        scale1_q16,
+    }
+}
+
+/// Progressive zero-float Any-Rate dot product in Q15.16 (`active_planes = 1` or `2`).
+/// Returns the dot product scaled in Q15.16 (`sum_i w_hat_i * x_i >> 16`).
+pub fn dot_anyrate_2plane_q16(
+    plane0: &[Trit],
+    plane1: &[Trit],
+    scales: AnyRate2PlaneScales,
+    activations_q16: &[i32],
+    active_planes: u8,
+) -> i64 {
+    let n = activations_q16.len();
+    assert_eq!(plane0.len(), n, "plane0 length mismatch");
+    assert_eq!(plane1.len(), n, "plane1 length mismatch");
+
+    let mut acc0: i128 = 0;
+    for i in 0..n {
+        match plane0[i] {
+            Trit::Pos => acc0 += activations_q16[i] as i128,
+            Trit::Neg => acc0 -= activations_q16[i] as i128,
+            Trit::Zero => {}
+        }
+    }
+    let mut total = acc0 * (scales.scale0_q16 as i128);
+    if active_planes >= 2 {
+        let mut acc1: i128 = 0;
+        for i in 0..n {
+            match plane1[i] {
+                Trit::Pos => acc1 += activations_q16[i] as i128,
+                Trit::Neg => acc1 -= activations_q16[i] as i128,
+                Trit::Zero => {}
+            }
+        }
+        total += acc1 * (scales.scale1_q16 as i128);
+    }
+    (total >> 16) as i64
+}

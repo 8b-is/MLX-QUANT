@@ -557,3 +557,54 @@ fn beehive_tequila_engram_sinkhorn_ramanujan_and_wta() {
         Q16_ONE
     );
 }
+
+#[test]
+fn anyrate_2plane_progressive_ternary_q16_slashes_error() {
+    let mut seed = 0x0002_6113_4402_u64;
+    let mut w = [0i32; 128];
+    let mut x = [0i32; 128];
+    for i in 0..128 {
+        seed = splitmix64(seed);
+        // Deterministic signed Q15.16 weights in roughly [-2.0, +2.0]
+        w[i] = (seed as i32) >> 14;
+        seed = splitmix64(seed);
+        x[i] = (seed as i32) >> 15;
+    }
+    let mut p0 = [Trit::Zero; 128];
+    let mut p1 = [Trit::Zero; 128];
+    let mut scratch = [0i32; 128];
+    let scales = quantize_anyrate_2plane_q16(&w, &mut p0, &mut p1, &mut scratch);
+    assert!(scales.scale0_q16 > 0);
+    assert!(scales.scale1_q16 > 0);
+    assert!(scales.scale1_q16 < scales.scale0_q16);
+
+    let mut sq_err_p1: i128 = 0;
+    let mut sq_err_p2: i128 = 0;
+    for i in 0..128 {
+        let q1 = (p0[i].as_i8() as i128) * (scales.scale0_q16 as i128);
+        let q2 = q1 + (p1[i].as_i8() as i128) * (scales.scale1_q16 as i128);
+        let wi = w[i] as i128;
+        sq_err_p1 += (wi - q1) * (wi - q1);
+        sq_err_p2 += (wi - q2) * (wi - q2);
+    }
+    // Plane 2 cuts squared error by >3x over Plane 1 in pure integer Q15.16!
+    assert!(
+        sq_err_p2 * 3 < sq_err_p1,
+        "expected >3x MSE drop: p1={sq_err_p1} vs p2={sq_err_p2}"
+    );
+
+    let exact_dot: i64 = (w
+        .iter()
+        .zip(&x)
+        .map(|(&wi, &xi)| (wi as i128) * (xi as i128))
+        .sum::<i128>()
+        >> 16) as i64;
+    let d1 = dot_anyrate_2plane_q16(&p0, &p1, scales, &x, 1);
+    let d2 = dot_anyrate_2plane_q16(&p0, &p1, scales, &x, 2);
+    assert!(
+        (d2 - exact_dot).abs() < (d1 - exact_dot).abs(),
+        "2-plane dot err {} should beat 1-plane dot err {}",
+        (d2 - exact_dot).abs(),
+        (d1 - exact_dot).abs()
+    );
+}
