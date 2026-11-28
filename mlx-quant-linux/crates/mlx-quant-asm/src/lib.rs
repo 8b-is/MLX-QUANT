@@ -127,6 +127,70 @@ pub fn ternary_2bit_gemv(
     }
 }
 
+/// Cross-architecture **Any-Rate 2-Plane Progressive Residual Ternary GEMV** (`arXiv:2611.34402`)
+/// in zero-float Q15.16 fixed-point (`active_planes = 1` or `2`).
+#[allow(clippy::too_many_arguments)]
+#[inline]
+pub fn anyrate_2plane_gemv(
+    w_plane0: &[u8],
+    w_plane1: &[u8],
+    scales0_q16: &[i32],
+    scales1_q16: &[i32],
+    x: &[i8],
+    y_out_q16: &mut [i64],
+    rows: usize,
+    cols: usize,
+    active_planes: u8,
+) {
+    #[cfg(target_arch = "aarch64")]
+    {
+        aarch64::anyrate_2plane_gemv_neon(
+            w_plane0,
+            w_plane1,
+            scales0_q16,
+            scales1_q16,
+            x,
+            y_out_q16,
+            rows,
+            cols,
+            active_planes,
+        );
+    }
+    #[cfg(not(target_arch = "aarch64"))]
+    {
+        assert!(y_out_q16.len() >= rows);
+        let row_bytes = cols.div_ceil(4);
+        let use_p1 = active_planes >= 2;
+        for r in 0..rows {
+            let row0 = &w_plane0[r * row_bytes..(r + 1) * row_bytes];
+            let row1 = &w_plane1[r * row_bytes..(r + 1) * row_bytes];
+            let mut acc0 = 0i64;
+            let mut acc1 = 0i64;
+            for c in 0..cols {
+                let shift = (c & 3) << 1;
+                let xi = x[c] as i64;
+                acc0 += match (row0[c >> 2] >> shift) & 0x03 {
+                    0 => -xi,
+                    2 => xi,
+                    _ => 0,
+                };
+                if use_p1 {
+                    acc1 += match (row1[c >> 2] >> shift) & 0x03 {
+                        0 => -xi,
+                        2 => xi,
+                        _ => 0,
+                    };
+                }
+            }
+            let mut total = (acc0 as i128) * (scales0_q16[r] as i128);
+            if use_p1 {
+                total += (acc1 as i128) * (scales1_q16[r] as i128);
+            }
+            y_out_q16[r] = (total >> 16) as i64;
+        }
+    }
+}
+
 /// Cross-architecture INT4 signed-nibble GEMM (`C = A * B^T`).
 #[inline]
 pub fn int4_gemm(
@@ -670,6 +734,53 @@ mod tests {
             let h0 = hardware_counter();
             let h1 = hardware_counter();
             assert!(h1 >= h0);
+        }
+    }
+
+    #[test]
+    fn anyrate_2plane_gemv_matches_scalar_oracle_for_1_and_2_planes() {
+        let rows = 13usize;
+        let cols = 197usize;
+        let row_bytes = cols.div_ceil(4);
+        let mut p0 = vec![0u8; rows * row_bytes];
+        let mut p1 = vec![0u8; rows * row_bytes];
+        let mut s0 = vec![0i32; rows];
+        let mut s1 = vec![0i32; rows];
+        let mut x = vec![0i8; cols];
+
+        let mut seed = 0xCAFE_BABE_1234_5678u64;
+        for xi in &mut x {
+            seed = splitmix64(seed);
+            *xi = (seed & 0xFF) as i8;
+        }
+        for r in 0..rows {
+            seed = splitmix64(seed);
+            s0[r] = ((seed & 0x1FFF) as i32) + 4096;
+            seed = splitmix64(seed);
+            s1[r] = ((seed & 0x0FFF) as i32) + 1024;
+            for b in 0..row_bytes {
+                seed = splitmix64(seed);
+                p0[r * row_bytes + b] = (seed & 0xFF) as u8;
+                seed = splitmix64(seed);
+                p1[r * row_bytes + b] = (seed & 0xFF) as u8;
+            }
+        }
+
+        let mut y0_ref = vec![0i32; rows];
+        let mut y1_ref = vec![0i32; rows];
+        mlx_quant_core::ternary::ternary_2bit_gemv_scalar(&p0, &x, &mut y0_ref, rows, cols);
+        mlx_quant_core::ternary::ternary_2bit_gemv_scalar(&p1, &x, &mut y1_ref, rows, cols);
+
+        for active_planes in [1u8, 2u8] {
+            let mut actual = vec![0i64; rows];
+            anyrate_2plane_gemv(&p0, &p1, &s0, &s1, &x, &mut actual, rows, cols, active_planes);
+            for r in 0..rows {
+                let mut exp = (y0_ref[r] as i128) * (s0[r] as i128);
+                if active_planes >= 2 {
+                    exp += (y1_ref[r] as i128) * (s1[r] as i128);
+                }
+                assert_eq!(actual[r], (exp >> 16) as i64, "row={r} planes={active_planes}");
+            }
         }
     }
 }

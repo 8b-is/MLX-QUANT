@@ -312,6 +312,129 @@ pub fn ternary_2bit_gemv_neon(
     }
 }
 
+/// AArch64 NEON **Any-Rate 2-Plane Progressive Residual Ternary** dot product (`arXiv:2611.34402`)
+/// over 64-lane 2-bit packed planes in zero-float Q15.16 fixed-point.
+///
+/// - `active_planes == 1`: executes ONLY Plane 0 (`1.6 bpw` Base-243 / 2-bit) via bare-metal NEON
+///   (`sdot` on `FEAT_DotProd` or `smull`/`sadalp` baseline).
+/// - `active_planes >= 2`: fuses Plane 0 + Plane 1 (`3.2 bpw` cumulative) with Q15.16 scale shift.
+#[inline]
+pub fn anyrate_2plane_dot_64_neon(
+    plane0: &[u8; 16],
+    plane1: &[u8; 16],
+    activations: &[i8; 64],
+    scale0_q16: i32,
+    scale1_q16: i32,
+    active_planes: u8,
+) -> i64 {
+    let acc0 = ternary_2bit_dot_64_neon(plane0, activations) as i128;
+    let mut total = acc0 * (scale0_q16 as i128);
+    if active_planes >= 2 {
+        let acc1 = ternary_2bit_dot_64_neon(plane1, activations) as i128;
+        total += acc1 * (scale1_q16 as i128);
+    }
+    (total >> 16) as i64
+}
+
+/// AArch64 NEON **Any-Rate 2-Plane Progressive Ternary GEMV** (`y_out_q16[r] = (s0*W0 + s1*W1) x >> 16`).
+///
+/// Streams L1-prefetched 64-column NEON blocks (`prfm pldl1keep`) from ONE nested 2-plane buffer;
+/// callers switch between `active_planes = 1` (fast coarse) and `active_planes = 2` (high accuracy)
+/// at runtime with zero re-quantization and zero floats (`#![no_std]`).
+#[allow(clippy::too_many_arguments)]
+pub fn anyrate_2plane_gemv_neon(
+    w_plane0: &[u8],
+    w_plane1: &[u8],
+    scales0_q16: &[i32],
+    scales1_q16: &[i32],
+    x: &[i8],
+    y_out_q16: &mut [i64],
+    rows: usize,
+    cols: usize,
+    active_planes: u8,
+) {
+    assert!(y_out_q16.len() >= rows, "y_out_q16 buffer too small");
+    assert!(scales0_q16.len() >= rows, "scales0_q16 buffer too small");
+    assert!(scales1_q16.len() >= rows, "scales1_q16 buffer too small");
+    assert!(x.len() >= cols, "x activation slice too small");
+    let row_bytes = cols.div_ceil(4);
+    assert!(w_plane0.len() >= rows.saturating_mul(row_bytes));
+    assert!(w_plane1.len() >= rows.saturating_mul(row_bytes));
+
+    if rows == 0 {
+        return;
+    }
+    if cols == 0 {
+        y_out_q16[..rows].fill(0);
+        return;
+    }
+
+    let full_blocks = cols / 64;
+    let tail_cols = cols - full_blocks * 64;
+    let use_p1 = active_planes >= 2;
+
+    let mut r = 0usize;
+    while r < rows {
+        let row_start = r * row_bytes;
+        let row0 = &w_plane0[row_start..row_start + row_bytes];
+        let row1 = &w_plane1[row_start..row_start + row_bytes];
+        if r + 1 < rows {
+            prefetch_l1_aarch64(w_plane0[(r + 1) * row_bytes..].as_ptr());
+            if use_p1 {
+                prefetch_l1_aarch64(w_plane1[(r + 1) * row_bytes..].as_ptr());
+            }
+        }
+
+        let mut acc0 = 0i64;
+        let mut acc1 = 0i64;
+        let mut blk = 0usize;
+        while blk < full_blocks {
+            let bo = blk * 16;
+            let co = blk * 64;
+            let x_blk: &[i8; 64] = (&x[co..co + 64]).try_into().expect("64-lane x");
+            let w0_blk: &[u8; 16] = (&row0[bo..bo + 16]).try_into().expect("16-byte w0");
+            acc0 += ternary_2bit_dot_64_neon(w0_blk, x_blk) as i64;
+            if use_p1 {
+                let w1_blk: &[u8; 16] = (&row1[bo..bo + 16]).try_into().expect("16-byte w1");
+                acc1 += ternary_2bit_dot_64_neon(w1_blk, x_blk) as i64;
+            }
+            blk += 1;
+        }
+
+        if tail_cols > 0 {
+            let base_byte = full_blocks * 16;
+            let base_col = full_blocks * 64;
+            let mut c = 0usize;
+            while c < tail_cols {
+                let shift = (c & 3) << 1;
+                let xi = x[base_col + c] as i64;
+                let c0 = (row0[base_byte + (c >> 2)] >> shift) & 0x03;
+                acc0 += match c0 {
+                    0 => -xi,
+                    2 => xi,
+                    _ => 0,
+                };
+                if use_p1 {
+                    let c1 = (row1[base_byte + (c >> 2)] >> shift) & 0x03;
+                    acc1 += match c1 {
+                        0 => -xi,
+                        2 => xi,
+                        _ => 0,
+                    };
+                }
+                c += 1;
+            }
+        }
+
+        let mut total = (acc0 as i128) * (scales0_q16[r] as i128);
+        if use_p1 {
+            total += (acc1 as i128) * (scales1_q16[r] as i128);
+        }
+        y_out_q16[r] = (total >> 16) as i64;
+        r += 1;
+    }
+}
+
 /// Baseline NEON 32-element INT4 signed-nibble dot product (16 packed bytes per operand).
 ///
 /// Sign-extends low nibbles `[3:0]` via `shl #4` / `sshr #4` and high nibbles `[7:4]` via
